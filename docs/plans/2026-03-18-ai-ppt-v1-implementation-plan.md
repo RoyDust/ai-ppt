@@ -2,15 +2,28 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Build an AI PPT v1 flow on top of PPTist that supports full-deck generation with target page count guidance and single-slide regeneration while keeping the output editable and exportable.
+**Goal:** Build an AI PPT v1 product on top of PPTist with a single integrated frontend, a NestJS backend, versioned deck persistence, full-deck generation, and single-slide regeneration with preview.
 
-**Architecture:** Introduce a new semantic `AIDeck` schema between AI responses and PPTist slide JSON, then rework the existing AI dialog to use a plan-render pipeline and a separate slide-regeneration workflow. Keep PPTist as the editor and export engine, and keep rendering deterministic with template-family-based adapters instead of asking the model to emit native PPTist slide structures.
+**Architecture:** Keep PPTist as the editor core inside the existing Vue app, add a dedicated `src/ai/` application layer on the frontend, and introduce a new `server/` NestJS monorepo for API, worker, orchestration, persistence, and PPTist adaptation. Persist current deck state in `decks`, historical snapshots in `deck_versions`, and all AI operations in `ai_tasks`.
 
-**Tech Stack:** Vue 3, TypeScript, Pinia, Vite, Vitest, existing PPTist slide schema, `fetch`/`axios`, existing template-mapping logic from `src/hooks/useAIPPT.ts`
+**Tech Stack:** Vue 3, TypeScript, Pinia, Vite, Vitest, Node.js, NestJS, PostgreSQL, Prisma, Redis, BullMQ, object storage, existing PPTist slide schema and template-mapping logic
 
 ---
 
-### Task 1: Add Minimal Test Infrastructure
+## Implementation Order
+
+The work should proceed in this order:
+
+1. Add minimal frontend test infrastructure so new pure modules can be verified.
+2. Stand up the `server/` backend workspace and scripts.
+3. Create the PostgreSQL / Prisma schema for `users`, `projects`, `decks`, `deck_versions`, `ai_tasks`, and `exports`.
+4. Add backend AI schema contracts, orchestration skeletons, and queue boundaries.
+5. Add frontend AI schema, stores, and adapters in `src/ai/`.
+6. Rework the current AI dialog into a plan-render flow.
+7. Add single-slide regeneration with preview and accepted replacement.
+8. Add version persistence, task logging, and end-to-end verification.
+
+### Task 1: Add Minimal Frontend Test Infrastructure
 
 **Files:**
 - Modify: `package.json`
@@ -22,8 +35,8 @@
 ```ts
 import { describe, expect, it } from 'vitest'
 
-describe('ai test harness', () => {
-  it('runs a basic unit test', () => {
+describe('ai frontend test harness', () => {
+  it('runs a basic test', () => {
     expect(true).toBe(true)
   })
 })
@@ -33,7 +46,7 @@ describe('ai test harness', () => {
 
 Run: `npx vitest run tests/unit/ai/smoke.test.ts`
 
-Expected: FAIL with `Cannot find package 'vitest'` or missing test configuration.
+Expected: FAIL with missing `vitest` or missing config.
 
 **Step 3: Write minimal implementation**
 
@@ -68,7 +81,7 @@ export default defineConfig({
 
 Run: `npm install`
 
-Expected: `vitest` and `jsdom` are added to `node_modules` and lockfile is updated.
+Expected: `vitest` and `jsdom` are installed and the lockfile updates.
 
 **Step 5: Run test to verify it passes**
 
@@ -80,42 +93,323 @@ Expected: PASS.
 
 ```bash
 git add package.json package-lock.json vite.config.ts tests/unit/ai/smoke.test.ts
-git commit -m "test: add minimal vitest harness for ai work"
+git commit -m "test: add minimal frontend vitest harness"
 ```
 
-### Task 2: Define the Shared AI Deck Schema and Validators
+### Task 2: Create the Backend Workspace Skeleton
 
 **Files:**
-- Create: `src/types/aiDeck.ts`
-- Create: `src/utils/aiDeck/guards.ts`
-- Create: `tests/unit/ai/guards.test.ts`
+- Create: `server/package.json`
+- Create: `server/tsconfig.json`
+- Create: `server/nest-cli.json`
+- Create: `server/apps/api/src/main.ts`
+- Create: `server/apps/api/src/app.module.ts`
+- Create: `server/apps/worker/src/main.ts`
+- Create: `server/apps/worker/src/worker.module.ts`
+- Create: `server/libs/db/src/prisma/.gitkeep`
+
+**Step 1: Write the failing command check**
+
+Run: `test -f server/package.json`
+
+Expected: FAIL because `server/` does not exist.
+
+**Step 2: Write minimal implementation**
+
+Create `server/package.json`:
+
+```json
+{
+  "name": "pptist-ai-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:api": "nest start api --watch",
+    "dev:worker": "nest start worker --watch",
+    "build": "nest build api && nest build worker",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.0",
+    "@nestjs/schematics": "^11.0.0",
+    "@nestjs/testing": "^11.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
+  }
+}
+```
+
+Create `server/apps/api/src/main.ts`:
+
+```ts
+import { NestFactory } from '@nestjs/core'
+import { AppModule } from './app.module'
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule)
+  await app.listen(3001)
+}
+
+bootstrap()
+```
+
+Create `server/apps/api/src/app.module.ts`:
+
+```ts
+import { Module } from '@nestjs/common'
+
+@Module({})
+export class AppModule {}
+```
+
+Create `server/apps/worker/src/main.ts`:
+
+```ts
+import { NestFactory } from '@nestjs/core'
+import { WorkerModule } from './worker.module'
+
+async function bootstrap() {
+  const app = await NestFactory.createApplicationContext(WorkerModule)
+  return app
+}
+
+bootstrap()
+```
+
+Create `server/apps/worker/src/worker.module.ts`:
+
+```ts
+import { Module } from '@nestjs/common'
+
+@Module({})
+export class WorkerModule {}
+```
+
+**Step 3: Run workspace verification**
+
+Run: `test -f server/apps/api/src/main.ts`
+
+Expected: PASS.
+
+**Step 4: Commit**
+
+```bash
+git add server/package.json server/tsconfig.json server/nest-cli.json server/apps server/libs/db/src/prisma/.gitkeep
+git commit -m "feat: add backend workspace skeleton"
+```
+
+### Task 3: Add the PostgreSQL / Prisma Schema
+
+**Files:**
+- Create: `server/prisma/schema.prisma`
+- Create: `server/prisma/migrations/.gitkeep`
+- Create: `server/libs/db/src/prisma.service.ts`
+- Create: `server/tests/db/schema.test.ts`
+
+**Step 1: Write the failing schema test**
+
+```ts
+import { describe, expect, it } from 'vitest'
+import fs from 'node:fs'
+
+describe('database schema', () => {
+  it('defines deck_versions and ai_tasks', () => {
+    const schema = fs.readFileSync('server/prisma/schema.prisma', 'utf8')
+    expect(schema).toContain('model DeckVersion')
+    expect(schema).toContain('model AITask')
+  })
+})
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd server && npx vitest run tests/db/schema.test.ts`
+
+Expected: FAIL because the Prisma schema file does not exist.
+
+**Step 3: Write minimal implementation**
+
+Create `server/prisma/schema.prisma` with:
+
+```prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id          String   @id @default(uuid())
+  username    String   @unique
+  displayName String?
+  email       String?
+  avatarUrl   String?
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  projects    Project[]
+  decks       Deck[]
+  versions    DeckVersion[] @relation("DeckVersionCreatedBy")
+  aiTasks     AITask[]
+  exports     Export[]
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  description String?
+  coverUrl    String?
+  status      String   @default("active")
+  archivedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id])
+  decks       Deck[]
+  aiTasks     AITask[]
+}
+
+model Deck {
+  id              String        @id @default(uuid())
+  projectId       String
+  userId          String
+  title           String
+  topic           String?
+  language        String        @default("zh-CN")
+  purpose         String?
+  audience        String?
+  tone            String?
+  status          String        @default("draft")
+  targetPageCount Int?
+  actualPageCount Int?
+  currentVersionId String?
+  latestTaskId    String?
+  thumbnailUrl    String?
+  outlineSummary  String?
+  metadataJson    Json          @default("{}")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  project         Project       @relation(fields: [projectId], references: [id])
+  user            User          @relation(fields: [userId], references: [id])
+  versions        DeckVersion[]
+  aiTasks         AITask[]
+  exports         Export[]
+}
+
+model DeckVersion {
+  id                   String   @id @default(uuid())
+  deckId               String
+  versionNo            Int
+  sourceType           String
+  sourceTaskId         String?
+  parentVersionId      String?
+  titleSnapshot        String?
+  targetPageCount      Int?
+  actualPageCount      Int?
+  outlineJson          Json     @default("[]")
+  aiDeckJson           Json     @default("{}")
+  pptistSlidesJson     Json     @default("[]")
+  styleFingerprintJson Json     @default("{}")
+  summary              String?
+  isCurrent            Boolean  @default(false)
+  createdBy            String
+  createdAt            DateTime @default(now())
+
+  deck                 Deck     @relation(fields: [deckId], references: [id])
+  creator              User     @relation("DeckVersionCreatedBy", fields: [createdBy], references: [id])
+  aiTasks              AITask[]
+
+  @@unique([deckId, versionNo])
+}
+
+model AITask {
+  id            String      @id @default(uuid())
+  userId        String
+  projectId     String?
+  deckId        String?
+  deckVersionId String?
+  taskType      String
+  status        String
+  provider      String?
+  model         String?
+  inputJson     Json        @default("{}")
+  outputJson    Json        @default("{}")
+  errorCode     String?
+  errorMessage  String?
+  retryCount    Int         @default(0)
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  user          User        @relation(fields: [userId], references: [id])
+  project       Project?    @relation(fields: [projectId], references: [id])
+  deck          Deck?       @relation(fields: [deckId], references: [id])
+  deckVersion   DeckVersion? @relation(fields: [deckVersionId], references: [id])
+}
+
+model Export {
+  id            String   @id @default(uuid())
+  userId        String
+  deckId        String
+  deckVersionId String?
+  exportType    String
+  status        String
+  fileUrl       String?
+  fileSize      BigInt?
+  errorMessage  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id])
+  deck          Deck     @relation(fields: [deckId], references: [id])
+}
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd server && npx vitest run tests/db/schema.test.ts`
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add server/prisma/schema.prisma server/prisma/migrations/.gitkeep server/libs/db/src/prisma.service.ts server/tests/db/schema.test.ts
+git commit -m "feat: add versioned ai ppt database schema"
+```
+
+### Task 4: Add Backend AI Schema Contracts
+
+**Files:**
+- Create: `server/libs/ai-schema/src/ai-deck.ts`
+- Create: `server/libs/ai-schema/src/ai-slide.ts`
+- Create: `server/libs/ai-schema/src/regeneration-context.ts`
+- Create: `server/libs/ai-schema/src/style-fingerprint.ts`
+- Create: `server/libs/ai-schema/src/guards.ts`
+- Create: `server/tests/ai-schema/guards.test.ts`
 
 **Step 1: Write the failing test**
 
 ```ts
 import { describe, expect, it } from 'vitest'
-import { isAIDeck, isAISlide } from '@/utils/aiDeck/guards'
+import { isAIDeck } from '../../libs/ai-schema/src/guards'
 
-describe('ai deck guards', () => {
-  it('accepts a minimal valid content slide', () => {
-    expect(isAISlide({
-      id: 'slide_1',
-      kind: 'content',
-      title: '职业规划的重要性',
-      bullets: ['帮助建立目标感'],
-      regeneratable: true,
-    })).toBe(true)
-  })
-
-  it('rejects slides without kind', () => {
-    expect(isAISlide({
-      id: 'slide_2',
-      title: 'bad',
-      regeneratable: true,
-    })).toBe(false)
-  })
-
-  it('accepts a minimal valid deck', () => {
+describe('server ai schema guards', () => {
+  it('accepts a minimal deck payload', () => {
     expect(isAIDeck({
       id: 'deck_1',
       topic: '大学生职业生涯规划',
@@ -131,524 +425,211 @@ describe('ai deck guards', () => {
 
 **Step 2: Run test to verify it fails**
 
-Run: `npm run test -- tests/unit/ai/guards.test.ts`
+Run: `cd server && npx vitest run tests/ai-schema/guards.test.ts`
 
-Expected: FAIL with module-not-found errors for `@/utils/aiDeck/guards`.
+Expected: FAIL with missing module errors.
 
 **Step 3: Write minimal implementation**
 
-Create `src/types/aiDeck.ts`:
-
-```ts
-export type SlideKind =
-  | 'cover'
-  | 'agenda'
-  | 'section'
-  | 'content'
-  | 'summary'
-  | 'ending'
-
-export type LayoutHint =
-  | 'hero'
-  | 'list'
-  | 'two-column'
-  | 'image-left'
-  | 'image-right'
-  | 'comparison'
-  | 'timeline'
-
-export interface StyleFingerprint {
-  templateFamilyId: string
-  themeTokenId?: string
-  density?: 'light' | 'medium' | 'dense'
-  titleStyle?: string
-  bodyStyle?: string
-  primaryColor?: string
-  accentColor?: string
-}
-
-export interface SlideSection {
-  title?: string
-  body?: string
-  bullets?: string[]
-}
-
-export interface AISlide {
-  id: string
-  kind: SlideKind
-  title?: string
-  subtitle?: string
-  bullets?: string[]
-  sections?: SlideSection[]
-  speakerNote?: string
-  imagePrompt?: string
-  layoutHint?: LayoutHint
-  importance?: 'high' | 'medium' | 'low'
-  regeneratable: boolean
-  sourceContext?: string
-}
-
-export interface AIDeck {
-  id: string
-  topic: string
-  goalPageCount: number
-  actualPageCount: number
-  language: string
-  audience?: string
-  tone?: string
-  purpose?: string
-  outlineSummary: string
-  slides: AISlide[]
-}
-```
-
-Create `src/utils/aiDeck/guards.ts`:
-
-```ts
-import type { AIDeck, AISlide, SlideKind } from '@/types/aiDeck'
-
-const slideKinds: SlideKind[] = ['cover', 'agenda', 'section', 'content', 'summary', 'ending']
-
-export const isAISlide = (value: unknown): value is AISlide => {
-  if (!value || typeof value !== 'object') return false
-  const slide = value as Record<string, unknown>
-  return typeof slide.id === 'string' &&
-    typeof slide.regeneratable === 'boolean' &&
-    typeof slide.kind === 'string' &&
-    slideKinds.includes(slide.kind as SlideKind)
-}
-
-export const isAIDeck = (value: unknown): value is AIDeck => {
-  if (!value || typeof value !== 'object') return false
-  const deck = value as Record<string, unknown>
-  return typeof deck.id === 'string' &&
-    typeof deck.topic === 'string' &&
-    typeof deck.goalPageCount === 'number' &&
-    typeof deck.actualPageCount === 'number' &&
-    typeof deck.language === 'string' &&
-    typeof deck.outlineSummary === 'string' &&
-    Array.isArray(deck.slides)
-}
-```
+Create the shared backend schema types and guards so the backend validates model output before persistence or response emission.
 
 **Step 4: Run test to verify it passes**
 
-Run: `npm run test -- tests/unit/ai/guards.test.ts`
+Run: `cd server && npx vitest run tests/ai-schema/guards.test.ts`
 
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add src/types/aiDeck.ts src/utils/aiDeck/guards.ts tests/unit/ai/guards.test.ts
-git commit -m "feat: add ai deck schema and validators"
+git add server/libs/ai-schema/src server/tests/ai-schema/guards.test.ts
+git commit -m "feat: add backend ai schema contracts"
 ```
 
-### Task 3: Add Pure Request Builders for Planning and Regeneration
+### Task 5: Add Backend AI API Surface and Queue Boundaries
 
 **Files:**
-- Create: `src/utils/aiDeck/requests.ts`
-- Create: `tests/unit/ai/requests.test.ts`
+- Create: `server/apps/api/src/modules/ai/ai.module.ts`
+- Create: `server/apps/api/src/modules/ai/ai.controller.ts`
+- Create: `server/apps/api/src/modules/ai/ai.service.ts`
+- Create: `server/apps/api/src/modules/ai/dto/deck-plan.dto.ts`
+- Create: `server/apps/api/src/modules/ai/dto/deck-render.dto.ts`
+- Create: `server/apps/api/src/modules/ai/dto/slide-regenerate.dto.ts`
+- Create: `server/libs/queue/src/queue.module.ts`
+- Create: `server/libs/queue/src/queue.service.ts`
+- Create: `server/tests/api/ai.controller.test.ts`
+
+**Step 1: Write the failing API test**
+
+```ts
+import { describe, expect, it } from 'vitest'
+import fs from 'node:fs'
+
+describe('ai api surface', () => {
+  it('defines deck plan and slide regenerate endpoints', () => {
+    const controller = fs.readFileSync('server/apps/api/src/modules/ai/ai.controller.ts', 'utf8')
+    expect(controller).toContain("@Post('deck/plan')")
+    expect(controller).toContain("@Post('slide/regenerate')")
+  })
+})
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd server && npx vitest run tests/api/ai.controller.test.ts`
+
+Expected: FAIL.
+
+**Step 3: Write minimal implementation**
+
+Add controller methods for:
+
+- `POST /ai/deck/plan`
+- `POST /ai/deck/render`
+- `POST /ai/slide/regenerate`
+- `GET /ai/tasks/:id`
+
+The service should only orchestrate DTO validation and queue / service dispatch. It should not embed prompt strings.
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd server && npx vitest run tests/api/ai.controller.test.ts`
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add server/apps/api/src/modules/ai server/libs/queue/src server/tests/api/ai.controller.test.ts
+git commit -m "feat: add ai api endpoints and queue boundaries"
+```
+
+### Task 6: Add Backend Orchestrator and PPTist Adapter Skeletons
+
+**Files:**
+- Create: `server/libs/ai-orchestrator/src/planner/deck-planner.service.ts`
+- Create: `server/libs/ai-orchestrator/src/planner/page-count.service.ts`
+- Create: `server/libs/ai-orchestrator/src/renderer/deck-renderer.service.ts`
+- Create: `server/libs/ai-orchestrator/src/renderer/slide-regenerator.service.ts`
+- Create: `server/libs/ai-orchestrator/src/providers/llm-provider.interface.ts`
+- Create: `server/libs/pptist-adapter/src/deck-to-slides.service.ts`
+- Create: `server/libs/pptist-adapter/src/slide-to-pptist.service.ts`
+- Create: `server/tests/orchestrator/page-count.service.test.ts`
 
 **Step 1: Write the failing test**
 
 ```ts
 import { describe, expect, it } from 'vitest'
-import { buildDeckPlanPayload, buildSlideRegenerationPayload } from '@/utils/aiDeck/requests'
+import { clampPlannedPageCount } from '../../libs/ai-orchestrator/src/planner/page-count.service'
 
-describe('ai deck request builders', () => {
-  it('normalizes the goal page count for planning', () => {
-    expect(buildDeckPlanPayload({
-      topic: '大学生职业生涯规划',
-      goalPageCount: 0,
-      language: 'zh-CN',
-    }).goalPageCount).toBe(1)
-  })
-
-  it('includes slide mode and style fingerprint in regeneration requests', () => {
-    const payload = buildSlideRegenerationPayload({
-      deckId: 'deck_1',
-      slideId: 'slide_1',
-      instructions: '更简洁',
-      context: {
-        deckTopic: '大学生职业生涯规划',
-        deckOutlineSummary: '围绕职业认知展开',
-        currentSlideGoal: '解释职业规划的重要性',
-        currentSlideKind: 'content',
-        mode: 'content-only',
-        styleFingerprint: { templateFamilyId: 'business_v1' },
-      },
-    })
-
-    expect(payload.context.mode).toBe('content-only')
-    expect(payload.context.styleFingerprint.templateFamilyId).toBe('business_v1')
-  })
-})
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `npm run test -- tests/unit/ai/requests.test.ts`
-
-Expected: FAIL with module-not-found errors.
-
-**Step 3: Write minimal implementation**
-
-Create `src/utils/aiDeck/requests.ts`:
-
-```ts
-import type { SlideKind, StyleFingerprint } from '@/types/aiDeck'
-
-export interface DeckPlanForm {
-  topic: string
-  goalPageCount: number
-  language: string
-  audience?: string
-  purpose?: string
-  tone?: string
-}
-
-export interface SlideRegenerationPayload {
-  deckId: string
-  slideId: string
-  instructions?: string
-  context: {
-    deckTopic: string
-    deckOutlineSummary: string
-    prevSlideSummary?: string
-    nextSlideSummary?: string
-    currentSlideGoal: string
-    currentSlideKind: SlideKind
-    currentLayoutHint?: string
-    mode: 'content-only' | 'content-and-layout'
-    styleFingerprint: StyleFingerprint
-  }
-}
-
-export const buildDeckPlanPayload = (form: DeckPlanForm) => ({
-  ...form,
-  goalPageCount: Math.max(1, Math.floor(form.goalPageCount || 1)),
-})
-
-export const buildSlideRegenerationPayload = (payload: SlideRegenerationPayload) => payload
-```
-
-**Step 4: Run test to verify it passes**
-
-Run: `npm run test -- tests/unit/ai/requests.test.ts`
-
-Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add src/utils/aiDeck/requests.ts tests/unit/ai/requests.test.ts
-git commit -m "feat: add ai deck request builders"
-```
-
-### Task 4: Add Dedicated AI Service Client
-
-**Files:**
-- Create: `src/services/aiDeck.ts`
-- Modify: `src/services/index.ts`
-- Create: `tests/unit/ai/service.test.ts`
-
-**Step 1: Write the failing test**
-
-```ts
-import { describe, expect, it, vi } from 'vitest'
-
-vi.mock('@/services/fetch', () => ({
-  default: vi.fn(() => Promise.resolve({ ok: true })),
-}))
-
-describe('ai deck service client', () => {
-  it('calls the deck plan endpoint', async () => {
-    const { planDeck } = await import('@/services/aiDeck')
-    const response = await planDeck({
-      topic: '大学生职业生涯规划',
-      goalPageCount: 10,
-      language: 'zh-CN',
-    })
-
-    expect(response).toEqual({ ok: true })
-  })
-})
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `npm run test -- tests/unit/ai/service.test.ts`
-
-Expected: FAIL because `@/services/aiDeck` does not exist.
-
-**Step 3: Write minimal implementation**
-
-Create `src/services/aiDeck.ts`:
-
-```ts
-import fetchRequest from './fetch'
-import { SERVER_URL } from './index'
-
-export const planDeck = (body: unknown) => {
-  return fetchRequest(`${SERVER_URL}/ai/deck/plan`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  })
-}
-
-export const renderDeck = (body: unknown) => {
-  return fetchRequest(`${SERVER_URL}/ai/deck/render`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  })
-}
-
-export const regenerateSlide = (body: unknown) => {
-  return fetchRequest(`${SERVER_URL}/ai/slide/regenerate`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  })
-}
-```
-
-Update `src/services/index.ts` to export the new client alongside the old API object:
-
-```ts
-export * as aiDeckService from './aiDeck'
-```
-
-**Step 4: Run test to verify it passes**
-
-Run: `npm run test -- tests/unit/ai/service.test.ts`
-
-Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add src/services/aiDeck.ts src/services/index.ts tests/unit/ai/service.test.ts
-git commit -m "feat: add ai deck service client"
-```
-
-### Task 5: Add an AI Task Store for Planning, Rendering, and Preview
-
-**Files:**
-- Create: `src/store/aiTasks.ts`
-- Modify: `src/store/index.ts`
-- Modify: `src/store/main.ts`
-- Create: `tests/unit/ai/aiTasks.store.test.ts`
-
-**Step 1: Write the failing test**
-
-```ts
-import { beforeEach, describe, expect, it } from 'vitest'
-import { createPinia, setActivePinia } from 'pinia'
-import { useAITasksStore } from '@/store/aiTasks'
-
-describe('ai task store', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-  })
-
-  it('tracks the current deck planning status', () => {
-    const store = useAITasksStore()
-    store.setPlanningState('loading')
-    expect(store.planningState).toBe('loading')
-  })
-
-  it('stores a regenerated preview slide without mutating the active deck', () => {
-    const store = useAITasksStore()
-    store.setSlidePreview({ id: 'preview_1', kind: 'content', regeneratable: true })
-    expect(store.slidePreview?.id).toBe('preview_1')
-  })
-})
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `npm run test -- tests/unit/ai/aiTasks.store.test.ts`
-
-Expected: FAIL with module-not-found errors.
-
-**Step 3: Write minimal implementation**
-
-Create `src/store/aiTasks.ts`:
-
-```ts
-import { defineStore } from 'pinia'
-import type { AIDeck, AISlide } from '@/types/aiDeck'
-
-type TaskState = 'idle' | 'loading' | 'success' | 'error'
-
-export const useAITasksStore = defineStore('aiTasks', {
-  state: () => ({
-    planningState: 'idle' as TaskState,
-    renderingState: 'idle' as TaskState,
-    regenerationState: 'idle' as TaskState,
-    plannedDeck: null as AIDeck | null,
-    renderedDeck: null as AIDeck | null,
-    slidePreview: null as AISlide | null,
-    errorMessage: '',
-  }),
-  actions: {
-    setPlanningState(state: TaskState) {
-      this.planningState = state
-    },
-    setRenderingState(state: TaskState) {
-      this.renderingState = state
-    },
-    setRegenerationState(state: TaskState) {
-      this.regenerationState = state
-    },
-    setPlannedDeck(deck: AIDeck | null) {
-      this.plannedDeck = deck
-    },
-    setRenderedDeck(deck: AIDeck | null) {
-      this.renderedDeck = deck
-    },
-    setSlidePreview(slide: AISlide | null) {
-      this.slidePreview = slide
-    },
-    setErrorMessage(message: string) {
-      this.errorMessage = message
-    },
-    reset() {
-      this.planningState = 'idle'
-      this.renderingState = 'idle'
-      this.regenerationState = 'idle'
-      this.plannedDeck = null
-      this.renderedDeck = null
-      this.slidePreview = null
-      this.errorMessage = ''
-    },
-  },
-})
-```
-
-Update `src/store/index.ts`:
-
-```ts
-import { useAITasksStore } from './aiTasks'
-
-export {
-  useAITasksStore,
-}
-```
-
-Update `src/store/main.ts` only if needed for modal visibility, for example:
-
-```ts
-showAISlideRegenerateDialog: boolean
-```
-
-**Step 4: Run test to verify it passes**
-
-Run: `npm run test -- tests/unit/ai/aiTasks.store.test.ts`
-
-Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add src/store/aiTasks.ts src/store/index.ts src/store/main.ts tests/unit/ai/aiTasks.store.test.ts
-git commit -m "feat: add ai task store"
-```
-
-### Task 6: Build Pure Outline and Page Count Helpers
-
-**Files:**
-- Create: `src/utils/aiDeck/pageCount.ts`
-- Create: `src/utils/aiDeck/outline.ts`
-- Create: `tests/unit/ai/pageCount.test.ts`
-- Create: `tests/unit/ai/outline.test.ts`
-
-**Step 1: Write the failing page-count test**
-
-```ts
-import { describe, expect, it } from 'vitest'
-import { clampPlannedPageCount } from '@/utils/aiDeck/pageCount'
-
-describe('page count control', () => {
-  it('keeps counts within the allowed range', () => {
+describe('page count service', () => {
+  it('keeps generated counts within the agreed range', () => {
     expect(clampPlannedPageCount(10, 14)).toBe(12)
     expect(clampPlannedPageCount(10, 7)).toBe(9)
   })
 })
 ```
 
-**Step 2: Write the failing outline helper test**
+**Step 2: Run test to verify it fails**
+
+Run: `cd server && npx vitest run tests/orchestrator/page-count.service.test.ts`
+
+Expected: FAIL.
+
+**Step 3: Write minimal implementation**
+
+Implement:
+
+- Page-count clamping logic
+- Orchestrator service boundaries
+- Provider interface
+- PPTist adapter skeletons that accept `AIDeck` and `AISlide`
+
+Do not attempt full prompt tuning in this task. The goal is to lock service seams.
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd server && npx vitest run tests/orchestrator/page-count.service.test.ts`
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add server/libs/ai-orchestrator/src server/libs/pptist-adapter/src server/tests/orchestrator/page-count.service.test.ts
+git commit -m "feat: add orchestrator and adapter service skeletons"
+```
+
+### Task 7: Add Frontend AI Module Structure
+
+**Files:**
+- Create: `src/ai/types/deck.ts`
+- Create: `src/ai/types/slide.ts`
+- Create: `src/ai/types/regeneration.ts`
+- Create: `src/ai/services/aiDeck.ts`
+- Create: `src/ai/stores/aiTasks.ts`
+- Create: `src/ai/stores/aiDeck.ts`
+- Create: `tests/unit/ai/aiStores.test.ts`
+
+**Step 1: Write the failing test**
 
 ```ts
-import { describe, expect, it } from 'vitest'
-import { summarizeNeighborContext } from '@/utils/aiDeck/outline'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { useAITasksStore } from '@/ai/stores/aiTasks'
 
-describe('outline helpers', () => {
-  it('builds previous and next slide summaries', () => {
-    const result = summarizeNeighborContext([
-      { id: 'a', kind: 'cover', title: '封面', regeneratable: true },
-      { id: 'b', kind: 'content', title: '重要性', regeneratable: true },
-      { id: 'c', kind: 'content', title: '路径', regeneratable: true },
-    ], 1)
+describe('frontend ai stores', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
 
-    expect(result.prevSlideSummary).toContain('封面')
-    expect(result.nextSlideSummary).toContain('路径')
+  it('tracks planning state separately from editor state', () => {
+    const store = useAITasksStore()
+    store.setPlanningState('loading')
+    expect(store.planningState).toBe('loading')
   })
 })
 ```
 
-**Step 3: Run tests to verify they fail**
+**Step 2: Run test to verify it fails**
 
-Run: `npm run test -- tests/unit/ai/pageCount.test.ts tests/unit/ai/outline.test.ts`
+Run: `npm run test -- tests/unit/ai/aiStores.test.ts`
 
-Expected: FAIL with module-not-found errors.
+Expected: FAIL.
 
-**Step 4: Write minimal implementation**
+**Step 3: Write minimal implementation**
 
-Create `src/utils/aiDeck/pageCount.ts`:
+Add `src/ai/` with:
 
-```ts
-export const clampPlannedPageCount = (goal: number, actual: number) => {
-  const min = Math.max(1, goal - 1)
-  const max = goal + 2
-  return Math.min(max, Math.max(min, actual))
-}
-```
+- shared frontend AI types
+- a dedicated AI service client
+- an AI task store
+- an AI deck workflow store
 
-Create `src/utils/aiDeck/outline.ts`:
+Do not put planning or preview state into `src/store/main.ts` or `src/store/slides.ts`.
 
-```ts
-import type { AISlide } from '@/types/aiDeck'
+**Step 4: Run test to verify it passes**
 
-const summarizeSlide = (slide?: AISlide) => {
-  if (!slide) return ''
-  return [slide.title, slide.subtitle].filter(Boolean).join(' - ')
-}
-
-export const summarizeNeighborContext = (slides: AISlide[], index: number) => ({
-  prevSlideSummary: summarizeSlide(slides[index - 1]),
-  nextSlideSummary: summarizeSlide(slides[index + 1]),
-})
-```
-
-**Step 5: Run tests to verify they pass**
-
-Run: `npm run test -- tests/unit/ai/pageCount.test.ts tests/unit/ai/outline.test.ts`
+Run: `npm run test -- tests/unit/ai/aiStores.test.ts`
 
 Expected: PASS.
 
-**Step 6: Commit**
+**Step 5: Commit**
 
 ```bash
-git add src/utils/aiDeck/pageCount.ts src/utils/aiDeck/outline.ts tests/unit/ai/pageCount.test.ts tests/unit/ai/outline.test.ts
-git commit -m "feat: add ai deck planning helpers"
+git add src/ai tests/unit/ai/aiStores.test.ts
+git commit -m "feat: add frontend ai module structure"
 ```
 
-### Task 7: Build the PPTist Renderer Adapter
+### Task 8: Add Frontend Guards, Requests, and Adapters
 
 **Files:**
-- Create: `src/utils/aiDeck/renderDeck.ts`
-- Create: `src/utils/aiDeck/renderSlide.ts`
+- Create: `src/ai/utils/guards.ts`
+- Create: `src/ai/utils/requests.ts`
+- Create: `src/ai/utils/pageCount.ts`
+- Create: `src/ai/utils/outline.ts`
+- Create: `src/ai/adapters/renderDeck.ts`
+- Create: `src/ai/adapters/renderSlide.ts`
 - Modify: `src/hooks/useAIPPT.ts`
 - Create: `tests/unit/ai/renderDeck.test.ts`
 
@@ -656,28 +637,17 @@ git commit -m "feat: add ai deck planning helpers"
 
 ```ts
 import { describe, expect, it } from 'vitest'
-import type { AISlide } from '@/types/aiDeck'
-import { renderAISlideToPPTistSlide } from '@/utils/aiDeck/renderSlide'
+import { renderAISlideToPPTistSlide } from '@/ai/adapters/renderSlide'
 
-const templateSlide = {
-  id: 'template_1',
-  elements: [],
-  background: { type: 'solid', color: '#ffffff' },
-}
+describe('frontend ai adapter', () => {
+  it('renders a semantic slide into a PPTist-compatible slide shell', () => {
+    const rendered = renderAISlideToPPTistSlide(
+      { id: 'slide_1', kind: 'content', title: '职业规划的重要性', regeneratable: true },
+      { id: 'template_1', elements: [], background: { type: 'solid', color: '#fff' } } as any,
+    )
 
-describe('renderer adapter', () => {
-  it('renders a content slide into a PPTist slide shell', () => {
-    const aiSlide: AISlide = {
-      id: 'slide_1',
-      kind: 'content',
-      title: '职业规划的重要性',
-      bullets: ['帮助建立目标感'],
-      regeneratable: true,
-    }
-
-    const rendered = renderAISlideToPPTistSlide(aiSlide, templateSlide as any)
     expect(rendered.id).toBeDefined()
-    expect(rendered.background).toEqual(templateSlide.background)
+    expect(rendered.background).toEqual({ type: 'solid', color: '#fff' })
   })
 })
 ```
@@ -686,45 +656,18 @@ describe('renderer adapter', () => {
 
 Run: `npm run test -- tests/unit/ai/renderDeck.test.ts`
 
-Expected: FAIL with module-not-found errors.
+Expected: FAIL.
 
 **Step 3: Write minimal implementation**
 
-Create `src/utils/aiDeck/renderSlide.ts`:
+Add frontend guard and adapter utilities under `src/ai/`.
 
-```ts
-import { nanoid } from 'nanoid'
-import type { AISlide } from '@/types/aiDeck'
-import type { Slide } from '@/types/slides'
+Extract reusable template-matching logic from `src/hooks/useAIPPT.ts` into the new adapter layer so that:
 
-export const renderAISlideToPPTistSlide = (aiSlide: AISlide, templateSlide: Slide): Slide => {
-  return {
-    ...structuredClone(templateSlide),
-    id: nanoid(10),
-    aiMeta: {
-      id: aiSlide.id,
-      kind: aiSlide.kind,
-    } as any,
-  }
-}
-```
+- full-deck generation
+- slide regeneration
 
-Create `src/utils/aiDeck/renderDeck.ts`:
-
-```ts
-import type { AIDeck } from '@/types/aiDeck'
-import type { Slide } from '@/types/slides'
-import { renderAISlideToPPTistSlide } from './renderSlide'
-
-export const renderAIDeckToSlides = (deck: AIDeck, templateSlides: Slide[]) => {
-  return deck.slides.map((slide, index) => {
-    const template = templateSlides[index] || templateSlides[templateSlides.length - 1]
-    return renderAISlideToPPTistSlide(slide, template)
-  })
-}
-```
-
-Modify `src/hooks/useAIPPT.ts` by extracting reusable mapping helpers instead of duplicating template lookup logic in the new adapter.
+share the same rendering pipeline.
 
 **Step 4: Run test to verify it passes**
 
@@ -732,23 +675,22 @@ Run: `npm run test -- tests/unit/ai/renderDeck.test.ts`
 
 Expected: PASS.
 
-**Step 5: Expand implementation before moving on**
-
-Before the commit, replace the placeholder shell renderer with real template-family matching and text-placeholder filling by reusing logic from `src/hooks/useAIPPT.ts`. Keep the pure adapter in `src/utils/aiDeck/*` and leave `useAIPPT.ts` only as a thin compatibility wrapper until the UI migration is complete.
-
-**Step 6: Commit**
+**Step 5: Commit**
 
 ```bash
-git add src/utils/aiDeck/renderDeck.ts src/utils/aiDeck/renderSlide.ts src/hooks/useAIPPT.ts tests/unit/ai/renderDeck.test.ts
-git commit -m "feat: add ai deck renderer adapter"
+git add src/ai/utils src/ai/adapters src/hooks/useAIPPT.ts tests/unit/ai/renderDeck.test.ts
+git commit -m "feat: add frontend ai guards and adapters"
 ```
 
-### Task 8: Rework the AI Dialog Into a Plan-and-Render Flow
+### Task 9: Rework the AI Dialog Into Plan and Render Steps
 
 **Files:**
-- Create: `src/hooks/useAIDeckGeneration.ts`
+- Create: `src/ai/hooks/useAIDeckGeneration.ts`
+- Create: `src/ai/components/AIDeckSetupForm.vue`
+- Create: `src/ai/components/AIDeckOutlineReview.vue`
+- Create: `src/ai/components/AIDeckGenerating.vue`
 - Modify: `src/views/Editor/AIPPTDialog.vue`
-- Modify: `src/views/Editor/index.vue`
+- Modify: `src/views/Editor/EditorHeader/index.vue`
 - Modify: `src/views/Mobile/MobilePreview.vue`
 - Create: `tests/unit/ai/useAIDeckGeneration.test.ts`
 
@@ -758,7 +700,7 @@ git commit -m "feat: add ai deck renderer adapter"
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
-vi.mock('@/services/aiDeck', () => ({
+vi.mock('@/ai/services/aiDeck', () => ({
   planDeck: vi.fn(() => Promise.resolve({ slides: [], plannedPageCount: 10 })),
   renderDeck: vi.fn(() => Promise.resolve({ deck: { id: 'deck_1', slides: [] } })),
 }))
@@ -768,15 +710,10 @@ describe('useAIDeckGeneration', () => {
     setActivePinia(createPinia())
   })
 
-  it('moves from planning to outline review after a successful plan call', async () => {
-    const { default: useAIDeckGeneration } = await import('@/hooks/useAIDeckGeneration')
+  it('moves to outline review after planning succeeds', async () => {
+    const { default: useAIDeckGeneration } = await import('@/ai/hooks/useAIDeckGeneration')
     const generation = useAIDeckGeneration()
-    await generation.createPlan({
-      topic: '大学生职业生涯规划',
-      goalPageCount: 10,
-      language: 'zh-CN',
-    })
-
+    await generation.createPlan({ topic: '大学生职业生涯规划', goalPageCount: 10, language: 'zh-CN' })
     expect(generation.step.value).toBe('outline')
   })
 })
@@ -786,54 +723,17 @@ describe('useAIDeckGeneration', () => {
 
 Run: `npm run test -- tests/unit/ai/useAIDeckGeneration.test.ts`
 
-Expected: FAIL with module-not-found errors.
+Expected: FAIL.
 
 **Step 3: Write minimal implementation**
 
-Create `src/hooks/useAIDeckGeneration.ts` with:
+Split the existing AI dialog into:
 
-```ts
-import { ref } from 'vue'
-import { useAITasksStore } from '@/store'
-import { planDeck, renderDeck } from '@/services/aiDeck'
+- setup form
+- outline review
+- generating state
 
-type Step = 'setup' | 'outline' | 'rendering'
-
-export default () => {
-  const aiTasksStore = useAITasksStore()
-  const step = ref<Step>('setup')
-
-  const createPlan = async (payload: unknown) => {
-    aiTasksStore.setPlanningState('loading')
-    const result = await planDeck(payload)
-    aiTasksStore.setPlanningState('success')
-    aiTasksStore.setPlannedDeck(result as any)
-    step.value = 'outline'
-  }
-
-  const createDeck = async (payload: unknown) => {
-    aiTasksStore.setRenderingState('loading')
-    const result = await renderDeck(payload)
-    aiTasksStore.setRenderingState('success')
-    aiTasksStore.setRenderedDeck((result as any).deck || null)
-    step.value = 'rendering'
-  }
-
-  return {
-    step,
-    createPlan,
-    createDeck,
-  }
-}
-```
-
-Then rework `src/views/Editor/AIPPTDialog.vue` so the UI becomes:
-
-- Form step for topic and page count.
-- Outline review step.
-- Final generation step.
-
-The dialog should call the new composable instead of streaming directly from the old AIPPT endpoints.
+The dialog should become a container, not the owner of all AI business logic.
 
 **Step 4: Run test to verify it passes**
 
@@ -845,19 +745,23 @@ Expected: PASS.
 
 Run: `npm run dev`
 
-Expected: The editor opens, the AI dialog still opens from [src/views/Editor/EditorHeader/index.vue](/Users/roydust/Work/PPTist/src/views/Editor/EditorHeader/index.vue), and the new step flow renders without console errors.
+Expected:
+
+- The AI entry still opens from the editor header.
+- The dialog now has a plan step and an outline review step.
+- No AI result is written into `slidesStore` until rendering succeeds and the adapter/loader path completes.
 
 **Step 6: Commit**
 
 ```bash
-git add src/hooks/useAIDeckGeneration.ts src/views/Editor/AIPPTDialog.vue src/views/Editor/index.vue src/views/Mobile/MobilePreview.vue tests/unit/ai/useAIDeckGeneration.test.ts
+git add src/ai/hooks src/ai/components src/views/Editor/AIPPTDialog.vue src/views/Editor/EditorHeader/index.vue src/views/Mobile/MobilePreview.vue tests/unit/ai/useAIDeckGeneration.test.ts
 git commit -m "feat: rework ai dialog into plan and render flow"
 ```
 
-### Task 9: Load Rendered Decks Into the Existing Editor
+### Task 10: Add Frontend Loader and Deck Version Awareness
 
 **Files:**
-- Create: `src/hooks/useAIDeckLoader.ts`
+- Create: `src/ai/hooks/useAIDeckLoader.ts`
 - Modify: `src/hooks/useAddSlidesOrElements.ts`
 - Modify: `src/hooks/useSlideHandler.ts`
 - Create: `tests/unit/ai/useAIDeckLoader.test.ts`
@@ -874,8 +778,8 @@ describe('useAIDeckLoader', () => {
     setActivePinia(createPinia())
   })
 
-  it('replaces the empty deck with rendered slides when overwrite is true', async () => {
-    const { default: useAIDeckLoader } = await import('@/hooks/useAIDeckLoader')
+  it('loads rendered slides into the editor when overwrite is true', async () => {
+    const { default: useAIDeckLoader } = await import('@/ai/hooks/useAIDeckLoader')
     const slidesStore = useSlidesStore()
     const loader = useAIDeckLoader()
 
@@ -889,37 +793,13 @@ describe('useAIDeckLoader', () => {
 
 Run: `npm run test -- tests/unit/ai/useAIDeckLoader.test.ts`
 
-Expected: FAIL with module-not-found errors.
+Expected: FAIL.
 
 **Step 3: Write minimal implementation**
 
-Create `src/hooks/useAIDeckLoader.ts`:
+Add a dedicated loader that is the only path from rendered AI slides into the editor core.
 
-```ts
-import { useSlidesStore } from '@/store'
-import useSlideHandler from './useSlideHandler'
-import useAddSlidesOrElements from './useAddSlidesOrElements'
-import type { Slide } from '@/types/slides'
-
-export default () => {
-  const slidesStore = useSlidesStore()
-  const { resetSlides } = useSlideHandler()
-  const { addSlidesFromData } = useAddSlidesOrElements()
-
-  const loadSlidesIntoEditor = (slides: Slide[], overwrite: boolean) => {
-    if (overwrite) {
-      resetSlides()
-      slidesStore.setSlides(slides)
-      return
-    }
-    addSlidesFromData(slides)
-  }
-
-  return {
-    loadSlidesIntoEditor,
-  }
-}
-```
+Also keep room for version metadata returned by the backend so the frontend knows which `deck_version` is current after generation.
 
 **Step 4: Run test to verify it passes**
 
@@ -930,15 +810,16 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/hooks/useAIDeckLoader.ts src/hooks/useAddSlidesOrElements.ts src/hooks/useSlideHandler.ts tests/unit/ai/useAIDeckLoader.test.ts
-git commit -m "feat: add ai deck loader for editor integration"
+git add src/ai/hooks/useAIDeckLoader.ts src/hooks/useAddSlidesOrElements.ts src/hooks/useSlideHandler.ts tests/unit/ai/useAIDeckLoader.test.ts
+git commit -m "feat: add ai deck loader"
 ```
 
-### Task 10: Add Single-Slide Regeneration With Preview
+### Task 11: Add Single-Slide Regeneration With Preview
 
 **Files:**
-- Create: `src/hooks/useAISlideRegeneration.ts`
-- Create: `src/views/Editor/AISlideRegenerateDialog.vue`
+- Create: `src/ai/hooks/useAISlideRegeneration.ts`
+- Create: `src/ai/components/AISlideRegenerateDialog.vue`
+- Create: `src/ai/components/AISlidePreviewCard.vue`
 - Modify: `src/views/Editor/Thumbnails/index.vue`
 - Modify: `src/views/Editor/index.vue`
 - Modify: `src/store/main.ts`
@@ -950,7 +831,7 @@ git commit -m "feat: add ai deck loader for editor integration"
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
-vi.mock('@/services/aiDeck', () => ({
+vi.mock('@/ai/services/aiDeck', () => ({
   regenerateSlide: vi.fn(() => Promise.resolve({
     slide: {
       id: 'regen_1',
@@ -967,15 +848,10 @@ describe('useAISlideRegeneration', () => {
     setActivePinia(createPinia())
   })
 
-  it('stores regenerated slide preview instead of replacing immediately', async () => {
-    const { default: useAISlideRegeneration } = await import('@/hooks/useAISlideRegeneration')
+  it('stores a preview slide before any live mutation', async () => {
+    const { default: useAISlideRegeneration } = await import('@/ai/hooks/useAISlideRegeneration')
     const regeneration = useAISlideRegeneration()
-    await regeneration.regenerateCurrentSlide({
-      deckId: 'deck_1',
-      slideId: 'slide_1',
-      instructions: '更简洁',
-    } as any)
-
+    await regeneration.regenerateCurrentSlide({ deckId: 'deck_1', slideId: 'slide_1' } as any)
     expect(regeneration.previewSlide.value?.id).toBe('regen_1')
   })
 })
@@ -985,55 +861,23 @@ describe('useAISlideRegeneration', () => {
 
 Run: `npm run test -- tests/unit/ai/useAISlideRegeneration.test.ts`
 
-Expected: FAIL with module-not-found errors.
+Expected: FAIL.
 
 **Step 3: Write minimal implementation**
 
-Create `src/hooks/useAISlideRegeneration.ts`:
+Add:
 
-```ts
-import { computed } from 'vue'
-import { useAITasksStore } from '@/store'
-import { regenerateSlide } from '@/services/aiDeck'
+- regeneration hook
+- regeneration dialog
+- preview card
+- thumbnail context-menu entry for `重新生成此页`
 
-export default () => {
-  const aiTasksStore = useAITasksStore()
+The flow must be:
 
-  const regenerateCurrentSlide = async (payload: unknown) => {
-    aiTasksStore.setRegenerationState('loading')
-    const result = await regenerateSlide(payload)
-    aiTasksStore.setSlidePreview((result as any).slide || null)
-    aiTasksStore.setRegenerationState('success')
-  }
-
-  return {
-    previewSlide: computed(() => aiTasksStore.slidePreview),
-    regenerateCurrentSlide,
-  }
-}
-```
-
-Add a new modal component `src/views/Editor/AISlideRegenerateDialog.vue` to:
-
-- Show mode selector.
-- Show optional instruction text.
-- Show preview actions.
-- Offer `replace current slide` and `insert after current slide`.
-
-Modify `src/views/Editor/Thumbnails/index.vue` to add a context menu item:
-
-```ts
-{
-  text: '重新生成此页',
-  handler: openAISlideRegenerateDialog,
-}
-```
-
-Modify `src/store/main.ts` to track dialog visibility:
-
-```ts
-showAISlideRegenerateDialog: boolean
-```
+- collect context
+- call backend
+- render preview slide
+- let the user choose `replace current slide` or `insert after current slide`
 
 **Step 4: Run test to verify it passes**
 
@@ -1047,76 +891,67 @@ Run: `npm run dev`
 
 Expected:
 
-- Right-clicking a slide thumbnail shows `重新生成此页`.
-- Regeneration opens a modal instead of mutating the slide immediately.
-- Preview offers `替换当前页` and `插入到下一页`.
+- The thumbnail context menu includes `重新生成此页`.
+- Regeneration opens a preview dialog.
+- No current slide is overwritten until the user confirms.
 
 **Step 6: Commit**
 
 ```bash
-git add src/hooks/useAISlideRegeneration.ts src/views/Editor/AISlideRegenerateDialog.vue src/views/Editor/Thumbnails/index.vue src/views/Editor/index.vue src/store/main.ts tests/unit/ai/useAISlideRegeneration.test.ts
+git add src/ai/hooks/useAISlideRegeneration.ts src/ai/components/AISlideRegenerateDialog.vue src/ai/components/AISlidePreviewCard.vue src/views/Editor/Thumbnails/index.vue src/views/Editor/index.vue src/store/main.ts tests/unit/ai/useAISlideRegeneration.test.ts
 git commit -m "feat: add single-slide regeneration preview flow"
 ```
 
-### Task 11: Add Structured Logging and Basic Failure Telemetry
+### Task 12: Persist Deck Versions and AI Tasks End to End
 
 **Files:**
-- Create: `src/utils/aiDeck/logging.ts`
-- Modify: `src/hooks/useAIDeckGeneration.ts`
-- Modify: `src/hooks/useAISlideRegeneration.ts`
-- Create: `tests/unit/ai/logging.test.ts`
+- Modify: `server/apps/api/src/modules/ai/ai.service.ts`
+- Modify: `server/libs/db/src/prisma.service.ts`
+- Create: `server/libs/db/src/repositories/decks.repository.ts`
+- Create: `server/libs/db/src/repositories/deck-versions.repository.ts`
+- Create: `server/libs/db/src/repositories/ai-tasks.repository.ts`
+- Create: `server/tests/integration/version-persistence.test.ts`
 
 **Step 1: Write the failing test**
 
 ```ts
 import { describe, expect, it } from 'vitest'
-import { createAIDeckLogEvent } from '@/utils/aiDeck/logging'
 
-describe('ai logging helpers', () => {
-  it('creates a normalized generation event', () => {
-    expect(createAIDeckLogEvent('deck_rendered', {
-      goalPageCount: 10,
-      actualPageCount: 11,
-    })).toMatchObject({
-      event: 'deck_rendered',
-      goalPageCount: 10,
-      actualPageCount: 11,
-    })
+describe('version persistence plan', () => {
+  it('documents that accepted generation results create a new deck version', () => {
+    expect(true).toBe(true)
   })
 })
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 2: Replace the placeholder with a real integration test**
 
-Run: `npm run test -- tests/unit/ai/logging.test.ts`
+Write an integration test that verifies:
 
-Expected: FAIL with module-not-found errors.
+- full-deck generation creates an `ai_tasks` record
+- accepted render output creates a `deck_versions` row
+- accepted slide regeneration creates a new `deck_versions` row with `source_type = slide_regenerate`
+- `decks.current_version_id` is updated
 
-**Step 3: Write minimal implementation**
+**Step 3: Implement the repositories and persistence flow**
 
-Create `src/utils/aiDeck/logging.ts`:
+Persist:
 
-```ts
-export const createAIDeckLogEvent = (event: string, payload: Record<string, unknown>) => ({
-  event,
-  timestamp: Date.now(),
-  ...payload,
-})
-```
+- AI task input/output
+- deck version snapshots
+- current version pointer updates
 
-Then call this helper in the generation and regeneration composables before sending logs to the real analytics sink later.
+**Step 4: Run the integration test**
 
-**Step 4: Run test to verify it passes**
-
-Run: `npm run test -- tests/unit/ai/logging.test.ts`
+Run: `cd server && npx vitest run tests/integration/version-persistence.test.ts`
 
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add src/utils/aiDeck/logging.ts src/hooks/useAIDeckGeneration.ts src/hooks/useAISlideRegeneration.ts tests/unit/ai/logging.test.ts
-git commit -m "chore: add ai deck logging helpers"
+git add server/apps/api/src/modules/ai/ai.service.ts server/libs/db/src server/tests/integration/version-persistence.test.ts
+git commit -m "feat: persist ai tasks and deck versions"
 ```
 
 ## Verification Checklist Before Merge
@@ -1124,15 +959,21 @@ git commit -m "chore: add ai deck logging helpers"
 - Run: `npm run test`
 - Run: `npm run type-check`
 - Run: `npm run build`
+- Run: `cd server && npm run test`
+- Run: `cd server && npm run build`
 - Run: `npm run dev`
-- Manually verify full-deck generation flow in desktop editor.
-- Manually verify single-slide regeneration preview flow.
-- Manually verify generated decks can still export through the existing export dialog.
+- Run: `cd server && npm run dev:api`
+- Run: `cd server && npm run dev:worker`
+- Manually verify the full-deck generation flow in the editor.
+- Manually verify single-slide regeneration preview and accepted replacement.
+- Verify accepted generation and regeneration results create version snapshots.
+- Verify generated decks still export through the existing export dialog.
 
 ## Notes for the Implementer
 
-- Keep the new schema and helper logic pure wherever possible so most behavior can be tested without mounting the editor.
-- Avoid embedding LLM-specific assumptions in Vue components.
-- Reuse template-selection logic from `src/hooks/useAIPPT.ts`, but migrate that logic into `src/utils/aiDeck/*` instead of deepening the current monolith.
-- Do not directly mutate live PPTist slide JSON with model output during regeneration.
-- Keep v1 narrow: do not add full template management or image generation until the schema and regeneration loop are stable.
+- Do not keep growing `src/views/Editor/AIPPTDialog.vue` into a business-logic monolith.
+- Do not put AI workflow state into `slidesStore`.
+- Do not let backend model output skip schema validation.
+- Do not let frontend service responses skip adapter and loader boundaries.
+- Keep `deck_versions` as the main versioning primitive for both full-deck generation and slide regeneration.
+- Keep v1 narrow: no full template management platform, no deep Office-compatibility work, no multi-user collaboration.

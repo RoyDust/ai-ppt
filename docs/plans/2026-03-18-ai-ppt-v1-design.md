@@ -69,6 +69,33 @@ The product direction for v1 is:
 - The system must degrade gracefully when the generated content exceeds layout capacity.
 - Schema stability matters more than prompt cleverness.
 
+## Concrete Technical Decisions
+
+The following decisions were confirmed after the initial design discussion and should be treated as part of the v1 architecture baseline.
+
+### Frontend
+
+- The product remains a single frontend application built on top of the existing PPTist app.
+- There is no separate generation site and no editor-shell split for v1.
+- The existing PPTist editor remains the editing core.
+- AI workflows are added as a separate application layer inside the current frontend, not mixed into the editor core state model.
+
+### Backend
+
+- The backend should use `Node.js + TypeScript + NestJS`.
+- The backend should start as a NestJS monorepo with an `api` app and a `worker` app.
+- Persistent storage should use `PostgreSQL`.
+- Queueing and long-running task orchestration should use `Redis + BullMQ`.
+- Exported files and template assets should go to object storage such as `S3 / OSS / COS`.
+
+### Data Model
+
+- The database should follow a versioned business model.
+- `decks` stores the current working record.
+- `deck_versions` stores historical snapshots for generation, regeneration, import, and manual-save checkpoints.
+- `ai_tasks` stores all AI process records.
+- Complex generated structures should be stored in `jsonb` fields instead of being aggressively normalized in v1.
+
 ## Proposed Architecture
 
 The system is divided into three layers.
@@ -109,6 +136,128 @@ Responsibilities:
 - Emit valid PPTist slide data that can be edited, presented, and exported.
 
 This layer is deterministic and should not rely on LLM calls for normal rendering.
+
+## Frontend Architecture
+
+The frontend should be treated as a single Vue application with two internal zones:
+
+- `Editor Core`
+- `AI Application Layer`
+
+`Editor Core` is the existing PPTist editor and should continue to own:
+
+- Live slide editing
+- Canvas and element interactions
+- Thumbnails
+- Toolbar state
+- Presentation mode
+- Export
+
+`AI Application Layer` should own:
+
+- Full-deck generation flow
+- Outline review flow
+- Single-slide regeneration flow
+- AI task states
+- Preview and confirmation flows
+- Communication with backend AI endpoints
+
+The frontend should also introduce an explicit `AI Schema / Adapter Layer` so that backend responses never enter `slidesStore` directly.
+
+Recommended frontend structure:
+
+```text
+src/
+  ai/
+    types/
+    services/
+    stores/
+    hooks/
+    utils/
+    adapters/
+    components/
+```
+
+Recommended frontend state split:
+
+- `slidesStore` and existing editor stores continue to own editor runtime state.
+- New AI stores own planning, rendering, regeneration, preview, and task states.
+- Derived context such as neighbor summaries and style fingerprints should be computed, not permanently stored in editor state.
+
+This design keeps the editor stable while allowing AI workflows to evolve independently.
+
+## Backend Architecture
+
+The backend should not be a thin prompt proxy. It should be a layered AI orchestration system.
+
+Recommended backend structure:
+
+```text
+server/
+  apps/
+    api/
+    worker/
+  libs/
+    ai-schema/
+    ai-orchestrator/
+    pptist-adapter/
+    db/
+    queue/
+    storage/
+```
+
+`apps/api` is responsible for:
+
+- Input validation
+- Authentication if needed later
+- Creating and querying tasks
+- Returning deck and version metadata
+
+`apps/worker` is responsible for:
+
+- Deck rendering jobs
+- Slide regeneration jobs
+- Export jobs
+
+Core backend libraries:
+
+- `ai-schema`: shared semantic contract
+- `ai-orchestrator`: prompt orchestration, page planning, slide generation
+- `pptist-adapter`: deterministic mapping into PPTist-compatible slide data
+- `db`: PostgreSQL access
+- `queue`: BullMQ orchestration
+- `storage`: object storage integration
+
+Recommended v1 backend endpoints:
+
+- `POST /ai/deck/plan`
+- `POST /ai/deck/render`
+- `POST /ai/slide/regenerate`
+- `GET /ai/tasks/:id`
+
+The backend must validate model output before returning anything to the frontend or persisting it.
+
+## Persistence Model
+
+The persistence model for v1 should be version-oriented.
+
+Core entities:
+
+- `users`
+- `projects`
+- `decks`
+- `deck_versions`
+- `ai_tasks`
+- `exports`
+
+Key rules:
+
+- `decks` stores the current working metadata.
+- `deck_versions` stores snapshots such as AI generation results, slide regeneration results, import results, and manual-save checkpoints.
+- `ai_tasks` stores planning, rendering, regeneration, and future export task records.
+- Complex structures such as `outline_json`, `ai_deck_json`, `pptist_slides_json`, and `style_fingerprint_json` should stay in `jsonb` during v1.
+
+This model is important because both full-deck generation and single-slide regeneration naturally create new versions.
 
 ## Role of PPTist in the final product
 
@@ -411,6 +560,23 @@ Request:
 }
 ```
 
+### `GET /ai/tasks/:id`
+
+Purpose:
+
+- Query long-running task state for render, regeneration, or future export jobs.
+
+Response:
+
+```json
+{
+  "id": "task_xxx",
+  "taskType": "deck_render",
+  "status": "running",
+  "deckId": "deck_xxx"
+}
+```
+
 Response:
 
 ```json
@@ -624,6 +790,16 @@ The user should choose between:
 
 This is safer and improves trust in the regeneration workflow.
 
+### Frontend module boundary rule
+
+AI responses should always flow through:
+
+`service client -> schema guard -> adapter -> editor loader`
+
+They should never flow directly:
+
+`service client -> slidesStore`
+
 ## State Management
 
 AI generation state should be separated from the editor's normal editing state.
@@ -638,6 +814,7 @@ Recommended reason:
 Recommended additions:
 
 - A dedicated AI task store.
+- A dedicated AI deck workflow store.
 - Task state for planning, rendering, regeneration, preview, failure, and retry.
 - References between generated `AIDeck` entities and rendered PPTist slides.
 
@@ -648,6 +825,7 @@ Recommended additions:
 1. Schema validation on AI responses.
 2. Renderer validation before PPTist insertion.
 3. UI guard rails before replacing live slides.
+4. Backend persistence validation before writing version snapshots.
 
 ### Common failure modes
 
@@ -683,6 +861,8 @@ Testing must cover the schema and renderer boundaries, not only UI behavior.
 - Outline confirmation to slide loading.
 - Single-slide regeneration preview and replacement flow.
 - Renderer degradation on overlong content.
+- API-to-worker task flow for deck render jobs.
+- Deck version creation after full-deck generation and slide regeneration.
 
 ### Manual acceptance tests
 
@@ -690,6 +870,7 @@ Testing must cover the schema and renderer boundaries, not only UI behavior.
 - Multiple target page counts such as 6, 10, and 15.
 - Regeneration of cover-adjacent slides and mid-deck content slides.
 - Export after generation and after regeneration.
+- Re-open a deck and verify the current version pointer is correct.
 
 ## Observability
 
@@ -706,6 +887,8 @@ Recommended telemetry:
 - Regeneration request count.
 - Regeneration success and accept rate.
 - Renderer validation failure reasons.
+- Version creation count by source type.
+- Task durations by `task_type` and model.
 
 These metrics are important for prompt tuning and template tuning.
 
@@ -714,7 +897,10 @@ These metrics are important for prompt tuning and template tuning.
 ### Phase 1
 
 - Define and implement `AIDeck` schema.
+- Stand up backend foundation with NestJS `api` and `worker`.
+- Create PostgreSQL schema for `users`, `projects`, `decks`, `deck_versions`, and `ai_tasks`.
 - Build deck plan and deck render endpoints.
+- Build the frontend AI application layer inside the current single-page PPTist app.
 - Support `cover`, `agenda`, `content`, and `ending`.
 - Load generated deck into PPTist editor.
 
@@ -723,18 +909,21 @@ These metrics are important for prompt tuning and template tuning.
 - Add `section` and `summary`.
 - Improve page count control.
 - Improve deterministic degradation.
+- Persist generated snapshots into `deck_versions`.
 
 ### Phase 3
 
 - Add single-slide regeneration.
 - Support `content-only` and `content-and-layout`.
 - Add slide preview before replacement.
+- Create new deck versions for accepted slide regenerations.
 
 ### Phase 4
 
 - Add image strategy.
 - Add richer layout hints.
 - Consider template management workflows later.
+- Add export task persistence and object-storage-backed outputs.
 
 ## Main Risks
 
