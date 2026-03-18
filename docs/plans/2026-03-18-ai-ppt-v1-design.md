@@ -86,7 +86,19 @@ The following decisions were confirmed after the initial design discussion and s
 - The backend should start as a NestJS monorepo with an `api` app and a `worker` app.
 - Persistent storage should use `PostgreSQL`.
 - Queueing and long-running task orchestration should use `Redis + BullMQ`.
-- Exported files and template assets should go to object storage such as `S3 / OSS / COS`.
+- v1 file storage should use local filesystem storage first.
+- Object storage such as `S3 / OSS / COS` is deferred until later phases.
+
+### AI Provider
+
+- The first provider integration for v1 should be `OpenAI`.
+- The codebase should still keep a provider abstraction so additional providers can be added later without rewriting orchestration logic.
+
+### Image Strategy
+
+- v1 should not depend on real image search or image generation.
+- v1 deck generation should support `no-image` output or template-native placeholder imagery only.
+- Real image search / generation is deferred to a later phase.
 
 ### Data Model
 
@@ -226,7 +238,7 @@ Core backend libraries:
 - `pptist-adapter`: deterministic mapping into PPTist-compatible slide data
 - `db`: PostgreSQL access
 - `queue`: BullMQ orchestration
-- `storage`: object storage integration
+- `storage`: local filesystem storage for v1, object storage integration later
 
 Recommended v1 backend endpoints:
 
@@ -236,6 +248,11 @@ Recommended v1 backend endpoints:
 - `GET /ai/tasks/:id`
 
 The backend must validate model output before returning anything to the frontend or persisting it.
+
+For provider selection:
+
+- `OpenAI` is the first concrete provider for v1.
+- The backend should still expose a provider interface so future providers can be added.
 
 ## Persistence Model
 
@@ -633,7 +650,7 @@ The output includes:
 - Page title.
 - Supporting bullets or sections.
 - Layout hint.
-- Optional image prompt.
+- Optional placeholder-image intent, not real image generation in v1.
 - Local source context.
 
 ### Stage 4. Rendering to PPTist
@@ -733,6 +750,7 @@ Recommended v1 support:
 - One or two curated template families.
 - Support for `cover`, `agenda`, `content`, and `ending` first.
 - Add `section` and `summary` after the pipeline is stable.
+- Support decks that are fully text-driven or use template-native placeholder imagery only.
 
 The template family should expose enough variants to support:
 
@@ -899,6 +917,8 @@ These metrics are important for prompt tuning and template tuning.
 - Define and implement `AIDeck` schema.
 - Stand up backend foundation with NestJS `api` and `worker`.
 - Create PostgreSQL schema for `users`, `projects`, `decks`, `deck_versions`, and `ai_tasks`.
+- Implement the first `OpenAI` provider.
+- Implement local filesystem storage for generated files and template assets.
 - Build deck plan and deck render endpoints.
 - Build the frontend AI application layer inside the current single-page PPTist app.
 - Support `cover`, `agenda`, `content`, and `ending`.
@@ -910,6 +930,7 @@ These metrics are important for prompt tuning and template tuning.
 - Improve page count control.
 - Improve deterministic degradation.
 - Persist generated snapshots into `deck_versions`.
+- Improve placeholder-image handling inside templates.
 
 ### Phase 3
 
@@ -920,7 +941,7 @@ These metrics are important for prompt tuning and template tuning.
 
 ### Phase 4
 
-- Add image strategy.
+- Add real image strategy.
 - Add richer layout hints.
 - Consider template management workflows later.
 - Add export task persistence and object-storage-backed outputs.

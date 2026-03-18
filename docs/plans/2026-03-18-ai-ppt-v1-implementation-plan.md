@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Build an AI PPT v1 product on top of PPTist with a single integrated frontend, a NestJS backend, versioned deck persistence, full-deck generation, and single-slide regeneration with preview.
+**Goal:** Build an AI PPT v1 product on top of PPTist with a single integrated frontend, a NestJS backend, OpenAI as the first provider, versioned deck persistence, full-deck generation, and single-slide regeneration with preview.
 
-**Architecture:** Keep PPTist as the editor core inside the existing Vue app, add a dedicated `src/ai/` application layer on the frontend, and introduce a new `server/` NestJS monorepo for API, worker, orchestration, persistence, and PPTist adaptation. Persist current deck state in `decks`, historical snapshots in `deck_versions`, and all AI operations in `ai_tasks`.
+**Architecture:** Keep PPTist as the editor core inside the existing Vue app, add a dedicated `src/ai/` application layer on the frontend, and introduce a new `server/` NestJS monorepo for API, worker, orchestration, persistence, and PPTist adaptation. Persist current deck state in `decks`, historical snapshots in `deck_versions`, and all AI operations in `ai_tasks`. Use local filesystem storage in v1 and keep the image strategy limited to no-image output or template-native placeholder imagery.
 
-**Tech Stack:** Vue 3, TypeScript, Pinia, Vite, Vitest, Node.js, NestJS, PostgreSQL, Prisma, Redis, BullMQ, object storage, existing PPTist slide schema and template-mapping logic
+**Tech Stack:** Vue 3, TypeScript, Pinia, Vite, Vitest, Node.js, NestJS, PostgreSQL, Prisma, Redis, BullMQ, local filesystem storage, OpenAI provider integration, existing PPTist slide schema and template-mapping logic
 
 ---
 
@@ -17,11 +17,12 @@ The work should proceed in this order:
 1. Add minimal frontend test infrastructure so new pure modules can be verified.
 2. Stand up the `server/` backend workspace and scripts.
 3. Create the PostgreSQL / Prisma schema for `users`, `projects`, `decks`, `deck_versions`, `ai_tasks`, and `exports`.
-4. Add backend AI schema contracts, orchestration skeletons, and queue boundaries.
-5. Add frontend AI schema, stores, and adapters in `src/ai/`.
-6. Rework the current AI dialog into a plan-render flow.
-7. Add single-slide regeneration with preview and accepted replacement.
-8. Add version persistence, task logging, and end-to-end verification.
+4. Add backend AI schema contracts, orchestration skeletons, OpenAI provider support, and queue boundaries.
+5. Add local filesystem storage support for generated files and template assets.
+6. Add frontend AI schema, stores, and adapters in `src/ai/`.
+7. Rework the current AI dialog into a plan-render flow.
+8. Add single-slide regeneration with preview and accepted replacement.
+9. Add version persistence, task logging, and end-to-end verification.
 
 ### Task 1: Add Minimal Frontend Test Infrastructure
 
@@ -392,7 +393,7 @@ git add server/prisma/schema.prisma server/prisma/migrations/.gitkeep server/lib
 git commit -m "feat: add versioned ai ppt database schema"
 ```
 
-### Task 4: Add Backend AI Schema Contracts
+### Task 4: Add Backend AI Schema Contracts and OpenAI Provider Abstraction
 
 **Files:**
 - Create: `server/libs/ai-schema/src/ai-deck.ts`
@@ -400,6 +401,8 @@ git commit -m "feat: add versioned ai ppt database schema"
 - Create: `server/libs/ai-schema/src/regeneration-context.ts`
 - Create: `server/libs/ai-schema/src/style-fingerprint.ts`
 - Create: `server/libs/ai-schema/src/guards.ts`
+- Create: `server/libs/ai-orchestrator/src/providers/llm-provider.interface.ts`
+- Create: `server/libs/ai-orchestrator/src/providers/openai.provider.ts`
 - Create: `server/tests/ai-schema/guards.test.ts`
 
 **Step 1: Write the failing test**
@@ -433,6 +436,11 @@ Expected: FAIL with missing module errors.
 
 Create the shared backend schema types and guards so the backend validates model output before persistence or response emission.
 
+Also add:
+
+- a provider interface for future expansion
+- an `OpenAI` provider as the first concrete implementation for v1
+
 **Step 4: Run test to verify it passes**
 
 Run: `cd server && npx vitest run tests/ai-schema/guards.test.ts`
@@ -442,11 +450,57 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add server/libs/ai-schema/src server/tests/ai-schema/guards.test.ts
-git commit -m "feat: add backend ai schema contracts"
+git add server/libs/ai-schema/src server/libs/ai-orchestrator/src/providers server/tests/ai-schema/guards.test.ts
+git commit -m "feat: add backend ai schema and openai provider"
 ```
 
-### Task 5: Add Backend AI API Surface and Queue Boundaries
+### Task 5: Add Local Filesystem Storage Support
+
+**Files:**
+- Create: `server/libs/storage/src/storage.module.ts`
+- Create: `server/libs/storage/src/storage.service.ts`
+- Create: `server/tests/storage/storage.service.test.ts`
+
+**Step 1: Write the failing storage test**
+
+```ts
+import { describe, expect, it } from 'vitest'
+import fs from 'node:fs'
+
+describe('storage service', () => {
+  it('uses local filesystem storage in v1', () => {
+    const file = fs.readFileSync('server/libs/storage/src/storage.service.ts', 'utf8')
+    expect(file).toContain('writeFile')
+  })
+})
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd server && npx vitest run tests/storage/storage.service.test.ts`
+
+Expected: FAIL.
+
+**Step 3: Write minimal implementation**
+
+Add a storage service that writes generated files and local assets to the filesystem for v1.
+
+Do not add S3 / OSS integration in this task.
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd server && npx vitest run tests/storage/storage.service.test.ts`
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add server/libs/storage/src server/tests/storage/storage.service.test.ts
+git commit -m "feat: add local filesystem storage service"
+```
+
+### Task 6: Add Backend AI API Surface and Queue Boundaries
 
 **Files:**
 - Create: `server/apps/api/src/modules/ai/ai.module.ts`
@@ -504,14 +558,13 @@ git add server/apps/api/src/modules/ai server/libs/queue/src server/tests/api/ai
 git commit -m "feat: add ai api endpoints and queue boundaries"
 ```
 
-### Task 6: Add Backend Orchestrator and PPTist Adapter Skeletons
+### Task 7: Add Backend Orchestrator and PPTist Adapter Skeletons
 
 **Files:**
 - Create: `server/libs/ai-orchestrator/src/planner/deck-planner.service.ts`
 - Create: `server/libs/ai-orchestrator/src/planner/page-count.service.ts`
 - Create: `server/libs/ai-orchestrator/src/renderer/deck-renderer.service.ts`
 - Create: `server/libs/ai-orchestrator/src/renderer/slide-regenerator.service.ts`
-- Create: `server/libs/ai-orchestrator/src/providers/llm-provider.interface.ts`
 - Create: `server/libs/pptist-adapter/src/deck-to-slides.service.ts`
 - Create: `server/libs/pptist-adapter/src/slide-to-pptist.service.ts`
 - Create: `server/tests/orchestrator/page-count.service.test.ts`
@@ -542,7 +595,7 @@ Implement:
 
 - Page-count clamping logic
 - Orchestrator service boundaries
-- Provider interface
+- OpenAI-backed orchestration entry points
 - PPTist adapter skeletons that accept `AIDeck` and `AISlide`
 
 Do not attempt full prompt tuning in this task. The goal is to lock service seams.
@@ -560,7 +613,7 @@ git add server/libs/ai-orchestrator/src server/libs/pptist-adapter/src server/te
 git commit -m "feat: add orchestrator and adapter service skeletons"
 ```
 
-### Task 7: Add Frontend AI Module Structure
+### Task 8: Add Frontend AI Module Structure
 
 **Files:**
 - Create: `src/ai/types/deck.ts`
@@ -621,7 +674,7 @@ git add src/ai tests/unit/ai/aiStores.test.ts
 git commit -m "feat: add frontend ai module structure"
 ```
 
-### Task 8: Add Frontend Guards, Requests, and Adapters
+### Task 9: Add Frontend Guards, Requests, and Adapters
 
 **Files:**
 - Create: `src/ai/utils/guards.ts`
@@ -669,6 +722,11 @@ Extract reusable template-matching logic from `src/hooks/useAIPPT.ts` into the n
 
 share the same rendering pipeline.
 
+Keep image handling limited to:
+
+- no-image output
+- template-native placeholder-image output
+
 **Step 4: Run test to verify it passes**
 
 Run: `npm run test -- tests/unit/ai/renderDeck.test.ts`
@@ -682,7 +740,7 @@ git add src/ai/utils src/ai/adapters src/hooks/useAIPPT.ts tests/unit/ai/renderD
 git commit -m "feat: add frontend ai guards and adapters"
 ```
 
-### Task 9: Rework the AI Dialog Into Plan and Render Steps
+### Task 10: Rework the AI Dialog Into Plan and Render Steps
 
 **Files:**
 - Create: `src/ai/hooks/useAIDeckGeneration.ts`
@@ -758,7 +816,7 @@ git add src/ai/hooks src/ai/components src/views/Editor/AIPPTDialog.vue src/view
 git commit -m "feat: rework ai dialog into plan and render flow"
 ```
 
-### Task 10: Add Frontend Loader and Deck Version Awareness
+### Task 11: Add Frontend Loader and Deck Version Awareness
 
 **Files:**
 - Create: `src/ai/hooks/useAIDeckLoader.ts`
@@ -814,7 +872,7 @@ git add src/ai/hooks/useAIDeckLoader.ts src/hooks/useAddSlidesOrElements.ts src/
 git commit -m "feat: add ai deck loader"
 ```
 
-### Task 11: Add Single-Slide Regeneration With Preview
+### Task 12: Add Single-Slide Regeneration With Preview
 
 **Files:**
 - Create: `src/ai/hooks/useAISlideRegeneration.ts`
@@ -902,7 +960,7 @@ git add src/ai/hooks/useAISlideRegeneration.ts src/ai/components/AISlideRegenera
 git commit -m "feat: add single-slide regeneration preview flow"
 ```
 
-### Task 12: Persist Deck Versions and AI Tasks End to End
+### Task 13: Persist Deck Versions and AI Tasks End to End
 
 **Files:**
 - Modify: `server/apps/api/src/modules/ai/ai.service.ts`
@@ -976,4 +1034,6 @@ git commit -m "feat: persist ai tasks and deck versions"
 - Do not let backend model output skip schema validation.
 - Do not let frontend service responses skip adapter and loader boundaries.
 - Keep `deck_versions` as the main versioning primitive for both full-deck generation and slide regeneration.
+- Keep v1 image handling narrow: no real image search or image generation yet.
+- Keep v1 storage local-first instead of adding object storage too early.
 - Keep v1 narrow: no full template management platform, no deep Office-compatibility work, no multi-user collaboration.
