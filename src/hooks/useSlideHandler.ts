@@ -90,6 +90,13 @@ export default () => {
     addHistorySnapshot()
   }
 
+  const replaceSlidesFromData = (nextSlides: Slide[]) => {
+    mainStore.setActiveElementIdList([])
+    slidesStore.updateSlideIndex(0)
+    slidesStore.setSlides(nextSlides)
+    addHistorySnapshot()
+  }
+
   // 根据模板创建新页面
   const createSlideByTemplate = (slide: Slide) => {
     const { groupIdMap, elIdMap } = createElementIdMap(slide.elements)
@@ -180,6 +187,7 @@ export default () => {
     copySlide,
     pasteSlide,
     createSlide,
+    replaceSlidesFromData,
     createSlideByTemplate,
     copyAndPasteSlide,
     deleteSlide,

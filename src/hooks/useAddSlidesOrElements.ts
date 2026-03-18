@@ -99,8 +99,20 @@ export default () => {
     addHistorySnapshot()
   }
 
+  const loadSlidesFromData = (slides: Slide[], overwrite = false) => {
+    if (overwrite) {
+      slidesStore.updateSlideIndex(0)
+      slidesStore.setSlides(slides)
+      addHistorySnapshot()
+      return
+    }
+
+    addSlidesFromData(slides)
+  }
+
   return {
     addElementsFromData,
     addSlidesFromData,
+    loadSlidesFromData,
   }
 }

@@ -2,6 +2,8 @@ import { ref } from 'vue'
 import { nanoid } from 'nanoid'
 import type { ImageClipDataRange, PPTElement, PPTImageElement, PPTShapeElement, PPTTextElement, Slide, TextType } from '@/types/slides'
 import type { AIPPTSlide } from '@/types/AIPPT'
+import { expandAIPPTSlidesForRendering } from '@/ai/adapters/renderDeck'
+import { checkTextType, getUseableTemplates } from '@/ai/utils/outline'
 import { useSlidesStore } from '@/store'
 import useAddSlidesOrElements from './useAddSlidesOrElements'
 import useSlideHandler from './useSlideHandler'
@@ -22,52 +24,6 @@ export default () => {
   const transitionIndex = ref(0)
   const transitionTemplate = ref<Slide | null>(null)
 
-  const checkTextType = (el: PPTElement, type: TextType) => {
-    return (el.type === 'text' && el.textType === type) || (el.type === 'shape' && el.text && el.text.type === type)
-  }
-  
-  const getUseableTemplates = (templates: Slide[], n: number, type: TextType) => {
-    if (n === 1) {
-      const list = templates.filter(slide => {
-        const items = slide.elements.filter(el => checkTextType(el, type))
-        const titles = slide.elements.filter(el => checkTextType(el, 'title'))
-        const texts = slide.elements.filter(el => checkTextType(el, 'content'))
-  
-        return !items.length && titles.length === 1 && texts.length === 1
-      })
-  
-      if (list.length) return list
-    }
-  
-    let target: Slide | null = null
-  
-    const list = templates.filter(slide => {
-      const len = slide.elements.filter(el => checkTextType(el, type)).length
-      return len >= n
-    })
-    if (list.length === 0) {
-      const sorted = templates.sort((a, b) => {
-        const aLen = a.elements.filter(el => checkTextType(el, type)).length
-        const bLen = b.elements.filter(el => checkTextType(el, type)).length
-        return aLen - bLen
-      })
-      target = sorted[sorted.length - 1]
-    }
-    else {
-      target = list.reduce((closest, current) => {
-        const currentLen = current.elements.filter(el => checkTextType(el, type)).length
-        const closestLen = closest.elements.filter(el => checkTextType(el, type)).length
-        return (currentLen - n) <= (closestLen - n) ? current : closest
-      })
-    }
-  
-    return templates.filter(slide => {
-      const len = slide.elements.filter(el => checkTextType(el, type)).length
-      const targetLen = target!.elements.filter(el => checkTextType(el, type)).length
-      return len === targetLen
-    })
-  }
-  
   const getAdaptedFontsize = ({
     text,
     fontSize,
@@ -246,62 +202,7 @@ export default () => {
 
     if (imgs) imgPool.value = imgs
 
-    const AISlides: AIPPTSlide[] = []
-    for (const template of _AISlides) {
-      if (template.type === 'content') {
-        const items = template.data.items
-        if (items.length === 5 || items.length === 6) {
-          const items1 = items.slice(0, 3)
-          const items2 = items.slice(3)
-          AISlides.push({ ...template, data: { ...template.data, items: items1 } })
-          AISlides.push({ ...template, data: { ...template.data, items: items2 }, offset: 3 })
-        }
-        else if (items.length === 7 || items.length === 8) {
-          const items1 = items.slice(0, 4)
-          const items2 = items.slice(4)
-          AISlides.push({ ...template, data: { ...template.data, items: items1 } })
-          AISlides.push({ ...template, data: { ...template.data, items: items2 }, offset: 4 })
-        }
-        else if (items.length === 9 || items.length === 10) {
-          const items1 = items.slice(0, 3)
-          const items2 = items.slice(3, 6)
-          const items3 = items.slice(6)
-          AISlides.push({ ...template, data: { ...template.data, items: items1 } })
-          AISlides.push({ ...template, data: { ...template.data, items: items2 }, offset: 3 })
-          AISlides.push({ ...template, data: { ...template.data, items: items3 }, offset: 6 })
-        }
-        else if (items.length > 10) {
-          const items1 = items.slice(0, 4)
-          const items2 = items.slice(4, 8)
-          const items3 = items.slice(8)
-          AISlides.push({ ...template, data: { ...template.data, items: items1 } })
-          AISlides.push({ ...template, data: { ...template.data, items: items2 }, offset: 4 })
-          AISlides.push({ ...template, data: { ...template.data, items: items3 }, offset: 8 })
-        }
-        else {
-          AISlides.push(template)
-        }
-      }
-      else if (template.type === 'contents') {
-        const items = template.data.items
-        if (items.length === 11) {
-          const items1 = items.slice(0, 6)
-          const items2 = items.slice(6)
-          AISlides.push({ ...template, data: { ...template.data, items: items1 } })
-          AISlides.push({ ...template, data: { ...template.data, items: items2 }, offset: 6 })
-        }
-        else if (items.length > 11) {
-          const items1 = items.slice(0, 10)
-          const items2 = items.slice(10)
-          AISlides.push({ ...template, data: { ...template.data, items: items1 } })
-          AISlides.push({ ...template, data: { ...template.data, items: items2 }, offset: 10 })
-        }
-        else {
-          AISlides.push(template)
-        }
-      }
-      else AISlides.push(template)
-    }
+    const AISlides = expandAIPPTSlidesForRendering(_AISlides)
 
     const coverTemplates = templateSlides.filter(slide => slide.type === 'cover')
     const contentsTemplates = templateSlides.filter(slide => slide.type === 'contents')

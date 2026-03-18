@@ -39,6 +39,8 @@ export interface MainState {
   showMarkupPanel: boolean
   showImageLibPanel: boolean
   showAIPPTDialog: boolean | 'running'
+  showAISlideRegenerateDialog: boolean
+  aiSlideRegenerateContext: { deckId: string; slideId: string } | null
 }
 
 const nanoid = customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
@@ -77,6 +79,8 @@ export const useMainStore = defineStore('main', {
     showMarkupPanel: false, // 打开类型标注面板
     showImageLibPanel: false, // 打开图片库面板
     showAIPPTDialog: false, // 打开AIPPT创建窗口
+    showAISlideRegenerateDialog: false,
+    aiSlideRegenerateContext: null,
   }),
 
   getters: {
@@ -217,6 +221,14 @@ export const useMainStore = defineStore('main', {
 
     setAIPPTDialogState(show: boolean | 'running') {
       this.showAIPPTDialog = show
+    },
+
+    setAISlideRegenerateDialogState(show: boolean) {
+      this.showAISlideRegenerateDialog = show
+    },
+
+    setAISlideRegenerateContext(context: { deckId: string; slideId: string } | null) {
+      this.aiSlideRegenerateContext = context
     },
   },
 })

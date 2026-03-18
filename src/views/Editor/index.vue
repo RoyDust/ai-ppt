@@ -42,6 +42,14 @@
   >
     <AIPPTDialog />
   </Modal>
+
+  <Modal
+    :visible="showAISlideRegenerateDialog"
+    :width="640"
+    @closed="closeAISlideRegenerateDialog()"
+  >
+    <AISlideRegenerateDialog />
+  </Modal>
 </template>
 
 <script lang="ts" setup>
@@ -65,6 +73,7 @@ import SymbolPanel from './SymbolPanel.vue'
 import MarkupPanel from './MarkupPanel.vue'
 import ImageLibPanel from './ImageLibPanel.vue'
 import AIPPTDialog from './AIPPTDialog.vue'
+import AISlideRegenerateDialog from '@/ai/components/AISlideRegenerateDialog.vue'
 import Modal from '@/components/Modal.vue'
 
 const mainStore = useMainStore()
@@ -77,10 +86,12 @@ const {
   showMarkupPanel,
   showImageLibPanel,
   showAIPPTDialog,
+  showAISlideRegenerateDialog,
 } = storeToRefs(mainStore)
 
 const closeExportDialog = () => mainStore.setDialogForExport('')
 const closeAIPPTDialog = () => mainStore.setAIPPTDialogState(false)
+const closeAISlideRegenerateDialog = () => mainStore.setAISlideRegenerateDialogState(false)
 
 const remarkHeight = ref(40)
 

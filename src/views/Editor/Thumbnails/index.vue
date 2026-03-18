@@ -344,6 +344,16 @@ const contextmenusThumbnailItem = (): ContextmenuItem[] => {
       handler: copyAndPasteSlide,
     },
     {
+      text: '重新生成此页',
+      handler: () => {
+        mainStore.setAISlideRegenerateContext({
+          deckId: mainStore.databaseId,
+          slideId: currentSlide.value.id,
+        })
+        mainStore.setAISlideRegenerateDialogState(true)
+      },
+    },
+    {
       text: '删除页面',
       subText: 'Delete',
       handler: () => deleteSlide(),

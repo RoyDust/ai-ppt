@@ -1,0 +1,138 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id          String        @id @default(uuid())
+  username    String        @unique
+  displayName String?
+  email       String?
+  avatarUrl   String?
+  status      String        @default("active")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  projects    Project[]
+  decks       Deck[]
+  versions    DeckVersion[] @relation("DeckVersionCreatedBy")
+  aiTasks     AITask[]
+  exports     Export[]
+}
+
+model Project {
+  id          String    @id @default(uuid())
+  userId      String
+  name        String
+  description String?
+  coverUrl    String?
+  status      String    @default("active")
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user        User      @relation(fields: [userId], references: [id])
+  decks       Deck[]
+  aiTasks     AITask[]
+}
+
+model Deck {
+  id               String        @id @default(uuid())
+  projectId        String
+  userId           String
+  title            String
+  topic            String?
+  language         String        @default("zh-CN")
+  purpose          String?
+  audience         String?
+  tone             String?
+  status           String        @default("draft")
+  targetPageCount  Int?
+  actualPageCount  Int?
+  currentVersionId String?
+  latestTaskId     String?
+  thumbnailUrl     String?
+  outlineSummary   String?
+  metadataJson     Json          @default("{}")
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  project          Project       @relation(fields: [projectId], references: [id])
+  user             User          @relation(fields: [userId], references: [id])
+  versions         DeckVersion[]
+  aiTasks          AITask[]
+  exports          Export[]
+}
+
+model DeckVersion {
+  id                   String    @id @default(uuid())
+  deckId               String
+  versionNo            Int
+  sourceType           String
+  sourceTaskId         String?
+  parentVersionId      String?
+  titleSnapshot        String?
+  targetPageCount      Int?
+  actualPageCount      Int?
+  outlineJson          Json      @default("[]")
+  aiDeckJson           Json      @default("{}")
+  pptistSlidesJson     Json      @default("[]")
+  styleFingerprintJson Json      @default("{}")
+  summary              String?
+  isCurrent            Boolean   @default(false)
+  createdBy            String
+  createdAt            DateTime  @default(now())
+
+  deck                 Deck      @relation(fields: [deckId], references: [id])
+  creator              User      @relation("DeckVersionCreatedBy", fields: [createdBy], references: [id])
+  aiTasks              AITask[]
+
+  @@unique([deckId, versionNo])
+}
+
+model AITask {
+  id            String       @id @default(uuid())
+  userId        String
+  projectId     String?
+  deckId        String?
+  deckVersionId String?
+  taskType      String
+  status        String
+  provider      String?
+  model         String?
+  inputJson     Json         @default("{}")
+  outputJson    Json         @default("{}")
+  errorCode     String?
+  errorMessage  String?
+  retryCount    Int          @default(0)
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  user          User         @relation(fields: [userId], references: [id])
+  project       Project?     @relation(fields: [projectId], references: [id])
+  deck          Deck?        @relation(fields: [deckId], references: [id])
+  deckVersion   DeckVersion? @relation(fields: [deckVersionId], references: [id])
+}
+
+model Export {
+  id            String    @id @default(uuid())
+  userId        String
+  deckId        String
+  deckVersionId String?
+  exportType    String
+  status        String
+  fileUrl       String?
+  fileSize      BigInt?
+  errorMessage  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user          User      @relation(fields: [userId], references: [id])
+  deck          Deck      @relation(fields: [deckId], references: [id])
+}
