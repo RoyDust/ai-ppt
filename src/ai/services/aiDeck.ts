@@ -1,5 +1,5 @@
 import request from '@/services/axios'
-import type { AITaskResponse, DeckPlanInput, DeckPlanResponse, DeckRenderInput, DeckRenderResponse } from '../types/deck'
+import type { AITaskResponse, DeckAcceptResponse, DeckPlanInput, DeckPlanResponse, DeckRenderInput, DeckRenderResponse } from '../types/deck'
 import type { SlideRegenerationInput, SlideRegenerationResponse } from '../types/regeneration'
 
 export const planDeck = async (payload: DeckPlanInput): Promise<DeckPlanResponse> =>
@@ -7,6 +7,15 @@ export const planDeck = async (payload: DeckPlanInput): Promise<DeckPlanResponse
 
 export const renderDeck = async (payload: DeckRenderInput): Promise<DeckRenderResponse> =>
   request.post('/api/ai/deck/render', payload) as Promise<DeckRenderResponse>
+
+export const acceptDeckRender = async (payload: {
+  deckId: string
+  createdBy: string
+  sourceTaskId: string
+  pptistSlidesJson: unknown[]
+  aiDeckJson: unknown
+}): Promise<DeckAcceptResponse> =>
+  request.post('/api/ai/deck/accept', payload) as Promise<DeckAcceptResponse>
 
 export const regenerateSlide = async (payload: SlideRegenerationInput): Promise<SlideRegenerationResponse> =>
   request.post('/api/ai/slide/regenerate', payload) as Promise<SlideRegenerationResponse>

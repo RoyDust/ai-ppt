@@ -7,5 +7,10 @@ export interface AIDeck {
   actualPageCount: number
   language: string
   outlineSummary: string
+  designSystem?: string
+  themeName?: string
+  designRequirements?: string[]
+  designCharacteristics?: string[]
+  contentBlueprint?: string[]
   slides: AISlide[]
 }

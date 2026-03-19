@@ -1,5 +1,5 @@
 export class DeckRenderDto {
-  deckId!: string
+  deckId?: string
   outlineId?: string
   overwrite?: boolean
 }

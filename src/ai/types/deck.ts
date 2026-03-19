@@ -8,6 +8,11 @@ export interface AIDeck {
   actualPageCount: number
   language: string
   outlineSummary: string
+  designSystem?: string
+  themeName?: string
+  designRequirements?: string[]
+  designCharacteristics?: string[]
+  contentBlueprint?: string[]
   slides: AISlide[]
 }
 
@@ -40,4 +45,9 @@ export interface AITaskResponse {
     deck: AIDeck
     slides: Slide[]
   }
+}
+
+export interface DeckAcceptResponse {
+  versionId: string
+  slides: Slide[]
 }

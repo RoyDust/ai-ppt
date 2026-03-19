@@ -1,9 +1,10 @@
 import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useMainStore } from '@/store/main'
 import { useAIDeckStore } from '../stores/aiDeck'
 import { useAITasksStore } from '../stores/aiTasks'
 import useAIDeckLoader from './useAIDeckLoader'
-import { getAITask, planDeck, renderDeck } from '../services/aiDeck'
+import { acceptDeckRender, getAITask, planDeck, renderDeck } from '../services/aiDeck'
 import type { DeckPlanInput } from '../types/deck'
 
 export type AIDeckGenerationStep = 'setup' | 'outline' | 'generating'
@@ -11,6 +12,7 @@ export type AIDeckGenerationStep = 'setup' | 'outline' | 'generating'
 export default () => {
   const aiDeckStore = useAIDeckStore()
   const aiTasksStore = useAITasksStore()
+  const mainStore = useMainStore()
   const { loadSlidesIntoEditor } = useAIDeckLoader()
   const step = ref<AIDeckGenerationStep>('setup')
   const topic = ref('')
@@ -19,6 +21,17 @@ export default () => {
 
   const { plannedSlides, plannedPageCount } = storeToRefs(aiDeckStore)
   const outlineSlides = computed(() => plannedSlides.value)
+
+  const waitForTaskCompletion = async (taskId: string) => {
+    let attempts = 0
+    while (attempts < 40) {
+      const task = await getAITask(taskId)
+      if (task.status !== 'queued') return task
+      attempts++
+      await new Promise(resolve => window.setTimeout(resolve, 300))
+    }
+    return getAITask(taskId)
+  }
 
   const createPlan = async (input: DeckPlanInput) => {
     aiTasksStore.setPlanningState('loading')
@@ -43,14 +56,19 @@ export default () => {
     })
     aiTasksStore.setActiveTaskId(task.id)
 
-    let currentTask = await getAITask(task.id)
-    if (currentTask.status === 'queued') {
-      currentTask = await getAITask(task.id)
-    }
+    const currentTask = await waitForTaskCompletion(task.id)
 
     if (currentTask.status === 'succeeded' && currentTask.output) {
       aiDeckStore.setRenderedDeck(currentTask.output.deck)
-      loadSlidesIntoEditor(currentTask.output.slides, true)
+      const accepted = await acceptDeckRender({
+        deckId: currentTask.output.deck.id,
+        createdBy: 'system',
+        sourceTaskId: currentTask.id,
+        pptistSlidesJson: currentTask.output.slides,
+        aiDeckJson: currentTask.output.deck,
+      })
+      loadSlidesIntoEditor(accepted.slides, true)
+      mainStore.setAIPPTDialogState(false)
       step.value = 'outline'
     }
 

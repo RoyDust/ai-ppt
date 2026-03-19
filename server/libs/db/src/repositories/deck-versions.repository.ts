@@ -7,6 +7,7 @@ interface CreateDeckVersionInput {
   sourceTaskId?: string
   parentVersionId?: string
   pptistSlidesJson: unknown[]
+  aiDeckJson?: unknown
 }
 
 export class DeckVersionsRepository {
@@ -23,9 +24,12 @@ export class DeckVersionsRepository {
         parentVersionId: input.parentVersionId,
         createdBy: input.createdBy,
         pptistSlidesJson: input.pptistSlidesJson,
-        outlineJson: [],
-        aiDeckJson: {},
+        outlineJson: Array.isArray(input.aiDeckJson && (input.aiDeckJson as any).slides) ? (input.aiDeckJson as any).slides : [],
+        aiDeckJson: input.aiDeckJson ?? {},
         styleFingerprintJson: {},
+        titleSnapshot: typeof (input.aiDeckJson as any)?.topic === 'string' ? (input.aiDeckJson as any).topic : null,
+        targetPageCount: typeof (input.aiDeckJson as any)?.goalPageCount === 'number' ? (input.aiDeckJson as any).goalPageCount : null,
+        actualPageCount: typeof (input.aiDeckJson as any)?.actualPageCount === 'number' ? (input.aiDeckJson as any).actualPageCount : null,
       },
     })
   }

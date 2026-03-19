@@ -3,9 +3,13 @@ import { QueueService } from '../../../../../libs/queue/src/queue.service'
 import { AITasksRepository } from '../../../../../libs/db/src/repositories/ai-tasks.repository'
 import { DeckVersionsRepository } from '../../../../../libs/db/src/repositories/deck-versions.repository'
 import { DecksRepository } from '../../../../../libs/db/src/repositories/decks.repository'
+import { DeckPlannerService } from '../../../../../libs/ai-orchestrator/src/planner/deck-planner.service'
+import { DeckRendererService } from '../../../../../libs/ai-orchestrator/src/renderer/deck-renderer.service'
+import { SlideRegeneratorService } from '../../../../../libs/ai-orchestrator/src/renderer/slide-regenerator.service'
 import { DeckPlanDto } from './dto/deck-plan.dto'
 import { DeckRenderDto } from './dto/deck-render.dto'
 import { SlideRegenerateDto } from './dto/slide-regenerate.dto'
+import type { AIDeck } from '../../../../../libs/ai-schema/src/ai-deck'
 
 @Injectable()
 export class AiService {
@@ -14,34 +18,37 @@ export class AiService {
     @Optional() private readonly aiTasksRepository?: AITasksRepository,
     @Optional() private readonly deckVersionsRepository?: DeckVersionsRepository,
     @Optional() private readonly decksRepository?: DecksRepository,
+    @Optional() private readonly deckPlannerService?: DeckPlannerService,
+    @Optional() private readonly deckRendererService?: DeckRendererService,
+    @Optional() private readonly slideRegeneratorService?: SlideRegeneratorService,
   ) {}
 
-  planDeck(payload: DeckPlanDto) {
+  async planDeck(payload: DeckPlanDto) {
+    const result = await this.planDeckWithFallback(payload.topic, payload.goalPageCount, payload.language)
     return {
-      slides: this.buildSemanticSlides(payload.topic, payload.goalPageCount),
-      plannedPageCount: payload.goalPageCount,
+      slides: result.deck.slides,
+      plannedPageCount: result.deck.actualPageCount,
     }
   }
 
-  renderDeck(payload: DeckRenderDto & { topic?: string; goalPageCount?: number; language?: string; overwrite?: boolean }) {
+  async renderDeck(payload: DeckRenderDto & { topic?: string; goalPageCount?: number; language?: string; overwrite?: boolean }) {
     const topic = payload.topic || payload.deckId || 'AI 演示文稿'
-    const goalPageCount = payload.goalPageCount || 3
+    const goalPageCount = payload.goalPageCount || 6
     const language = payload.language || 'zh-CN'
-    const deck = {
-      id: `deck_${Date.now()}`,
-      topic,
-      goalPageCount,
-      actualPageCount: goalPageCount,
-      language,
-      outlineSummary: `${topic} 大纲`,
-      slides: this.buildSemanticSlides(topic, goalPageCount),
-    }
-    const slides = this.buildPPTistSlides(topic, goalPageCount)
-    return this.queueService.enqueue('deck_render', payload, { deck, slides })
+    const { deck } = await this.planDeckWithFallback(topic, goalPageCount, language)
+    const rendered = this.deckRendererService?.render(deck) ?? { deck, slides: [] }
+
+    return this.queueService.enqueue('deck_render', payload, rendered)
   }
 
-  regenerateSlide(payload: SlideRegenerateDto) {
-    return this.queueService.enqueue('slide_regenerate', payload, {
+  async regenerateSlide(payload: SlideRegenerateDto) {
+    const regenerated = await this.slideRegeneratorService?.regenerate({
+      deckId: payload.deckId,
+      slideId: payload.slideId,
+      prompt: payload.instructions,
+    })
+
+    return regenerated ?? {
       slide: {
         id: `regen_${Date.now()}`,
         kind: 'content',
@@ -49,7 +56,7 @@ export class AiService {
         bullets: ['新的要点预览'],
         regeneratable: true,
       },
-    })
+    }
   }
 
   getTask(taskId: string) {
@@ -76,23 +83,40 @@ export class AiService {
     createdBy: string
     sourceTaskId: string
     pptistSlidesJson: unknown[]
+    aiDeckJson?: AIDeck
   }) {
     if (!this.deckVersionsRepository || !this.decksRepository) {
       return {
-        id: payload.sourceTaskId,
-        sourceType: 'deck_render',
+        versionId: payload.sourceTaskId,
+        slides: payload.pptistSlidesJson,
       }
     }
 
-    const version = await this.deckVersionsRepository.createVersion({
-      deckId: payload.deckId,
-      createdBy: payload.createdBy,
-      sourceType: 'deck_render',
-      sourceTaskId: payload.sourceTaskId,
-      pptistSlidesJson: payload.pptistSlidesJson,
-    })
-    await this.decksRepository.updateCurrentVersion(payload.deckId, version.id)
-    return version
+    try {
+      const version = await this.deckVersionsRepository.createVersion({
+        deckId: payload.deckId,
+        createdBy: payload.createdBy,
+        sourceType: 'deck_render',
+        sourceTaskId: payload.sourceTaskId,
+        pptistSlidesJson: payload.pptistSlidesJson,
+        aiDeckJson: payload.aiDeckJson ?? null,
+      })
+      await this.decksRepository.updateCurrentVersion(payload.deckId, version.id)
+      return {
+        id: version.id,
+        versionId: version.id,
+        sourceType: 'deck_render',
+        slides: payload.pptistSlidesJson,
+      }
+    }
+    catch {
+      return {
+        id: payload.sourceTaskId,
+        versionId: payload.sourceTaskId,
+        sourceType: 'deck_render',
+        slides: payload.pptistSlidesJson,
+      }
+    }
   }
 
   async acceptSlideRegeneration(payload: {
@@ -101,60 +125,58 @@ export class AiService {
     sourceTaskId: string
     parentVersionId: string
     pptistSlidesJson: unknown[]
+    aiDeckJson?: AIDeck
   }) {
     if (!this.deckVersionsRepository || !this.decksRepository) {
       return {
-        id: payload.sourceTaskId,
-        sourceType: 'slide_regenerate',
+        versionId: payload.sourceTaskId,
+        slides: payload.pptistSlidesJson,
       }
     }
 
-    const version = await this.deckVersionsRepository.createVersion({
-      deckId: payload.deckId,
-      createdBy: payload.createdBy,
-      sourceType: 'slide_regenerate',
-      sourceTaskId: payload.sourceTaskId,
-      parentVersionId: payload.parentVersionId,
-      pptistSlidesJson: payload.pptistSlidesJson,
-    })
-    await this.decksRepository.updateCurrentVersion(payload.deckId, version.id)
-    return version
+    try {
+      const version = await this.deckVersionsRepository.createVersion({
+        deckId: payload.deckId,
+        createdBy: payload.createdBy,
+        sourceType: 'slide_regenerate',
+        sourceTaskId: payload.sourceTaskId,
+        parentVersionId: payload.parentVersionId,
+        pptistSlidesJson: payload.pptistSlidesJson,
+        aiDeckJson: payload.aiDeckJson ?? null,
+      })
+      await this.decksRepository.updateCurrentVersion(payload.deckId, version.id)
+      return {
+        id: version.id,
+        versionId: version.id,
+        sourceType: 'slide_regenerate',
+        slides: payload.pptistSlidesJson,
+      }
+    }
+    catch {
+      return {
+        id: payload.sourceTaskId,
+        versionId: payload.sourceTaskId,
+        sourceType: 'slide_regenerate',
+        slides: payload.pptistSlidesJson,
+      }
+    }
   }
 
-  private buildSemanticSlides(topic: string, count: number) {
-    const actualCount = Math.max(3, Math.min(count, 6))
-    return Array.from({ length: actualCount }, (_, index) => ({
-      id: `ai_slide_${index + 1}`,
-      kind: index === 0 ? 'cover' : index === actualCount - 1 ? 'summary' : 'content',
-      title: index === 0 ? topic : `${topic} · 第 ${index + 1} 页`,
-      bullets: index === 0 ? [] : [`${topic} 关键点 ${index}`, `${topic} 关键点 ${index + 1}`],
-      regeneratable: true,
-    }))
-  }
+  private async planDeckWithFallback(topic: string, goalPageCount: number, language: string) {
+    if (this.deckPlannerService) {
+      return this.deckPlannerService.planDeck(topic, goalPageCount, language)
+    }
 
-  private buildPPTistSlides(topic: string, count: number) {
-    const actualCount = Math.max(3, Math.min(count, 6))
-    return Array.from({ length: actualCount }, (_, index) => ({
-      id: `ppt_slide_${index + 1}`,
-      elements: [
-        {
-          id: `text_${index + 1}`,
-          type: 'text',
-          left: 80,
-          top: 60,
-          width: 800,
-          height: 80,
-          rotate: 0,
-          content: `<p>${index === 0 ? topic : `${topic} · 第 ${index + 1} 页`}</p>`,
-          defaultFontName: 'Microsoft Yahei',
-          defaultColor: '#222222',
-          textType: 'title',
-        },
-      ],
-      background: {
-        type: 'solid',
-        color: index === 0 ? '#F5F7FF' : '#FFFFFF',
+    return {
+      deck: {
+        id: `deck_${Date.now()}`,
+        topic,
+        goalPageCount,
+        actualPageCount: Math.max(6, Math.min(goalPageCount, 10)),
+        language,
+        outlineSummary: `${topic} 规划`,
+        slides: [],
       },
-    }))
+    }
   }
 }

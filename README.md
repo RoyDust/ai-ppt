@@ -55,6 +55,20 @@ npm run dev
 ```
 Browser access: http://127.0.0.1:5173/
 
+## Local Infra
+
+If you need local PostgreSQL and Redis for backend development:
+
+```bash
+docker compose up -d
+cp .env.example .env
+```
+
+Default local service endpoints:
+
+- PostgreSQL: `postgresql://postgres:postgres@127.0.0.1:5432/pptist`
+- Redis: `redis://127.0.0.1:6379`
+
 
 # 📚 Features
 ### Basic Features
