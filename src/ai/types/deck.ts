@@ -24,9 +24,12 @@ export interface DeckPlanInput {
 
 export interface DeckRenderInput extends DeckPlanInput {
   overwrite?: boolean
+  deck?: AIDeck
+  deckId?: string
 }
 
 export interface DeckPlanResponse {
+  deck: AIDeck
   slides: AISlide[]
   plannedPageCount: number
 }
@@ -41,6 +44,7 @@ export interface AITaskResponse {
   id: string
   status: 'queued' | 'succeeded' | 'failed'
   type?: string
+  error?: string
   output?: {
     deck: AIDeck
     slides: Slide[]

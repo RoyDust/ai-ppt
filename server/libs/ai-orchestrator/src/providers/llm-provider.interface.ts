@@ -11,6 +11,14 @@ export interface DeckPlanResult {
   deck: AIDeck
 }
 
+export interface DeckRenderRequest {
+  deck: AIDeck
+}
+
+export interface DeckRenderResult {
+  deck: AIDeck
+}
+
 export interface SlideRegenerationResult {
   slide: Record<string, unknown>
 }
@@ -18,5 +26,6 @@ export interface SlideRegenerationResult {
 export interface LLMProvider {
   readonly name: string
   planDeck(input: DeckPlanRequest): Promise<DeckPlanResult>
+  renderDeck(input: DeckRenderRequest): Promise<DeckRenderResult>
   regenerateSlide(input: SlideRegenerationContext): Promise<SlideRegenerationResult>
 }

@@ -43,7 +43,8 @@ import { AiService } from './ai.service'
     },
     {
       provide: DeckRendererService,
-      useFactory: () => new DeckRendererService(),
+      useFactory: (provider: OpenAIProvider) => new DeckRendererService(provider),
+      inject: [OpenAIProvider],
     },
     {
       provide: SlideRegeneratorService,

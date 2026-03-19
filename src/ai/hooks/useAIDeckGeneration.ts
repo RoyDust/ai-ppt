@@ -1,11 +1,13 @@
 import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useMainStore } from '@/store/main'
+import message from '@/utils/message'
 import { useAIDeckStore } from '../stores/aiDeck'
 import { useAITasksStore } from '../stores/aiTasks'
 import useAIDeckLoader from './useAIDeckLoader'
 import { acceptDeckRender, getAITask, planDeck, renderDeck } from '../services/aiDeck'
 import type { DeckPlanInput } from '../types/deck'
+import { pollAITaskUntilSettled } from '../utils/taskPolling'
 
 export type AIDeckGenerationStep = 'setup' | 'outline' | 'generating'
 
@@ -19,18 +21,15 @@ export default () => {
   const goalPageCount = ref(10)
   const language = ref('zh-CN')
 
-  const { plannedSlides, plannedPageCount } = storeToRefs(aiDeckStore)
-  const outlineSlides = computed(() => plannedSlides.value)
+  const { editableDeck, plannedPageCount } = storeToRefs(aiDeckStore)
+  const { lastPolledAt } = storeToRefs(aiTasksStore)
+  const outlineSlides = computed(() => editableDeck.value?.slides ?? [])
 
-  const waitForTaskCompletion = async (taskId: string) => {
-    let attempts = 0
-    while (attempts < 40) {
-      const task = await getAITask(taskId)
-      if (task.status !== 'queued') return task
-      attempts++
-      await new Promise(resolve => window.setTimeout(resolve, 300))
-    }
-    return getAITask(taskId)
+  const formatPollTime = (date = new Date()) => {
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    const seconds = String(date.getSeconds()).padStart(2, '0')
+    return `${hours}:${minutes}:${seconds}`
   }
 
   const createPlan = async (input: DeckPlanInput) => {
@@ -47,18 +46,30 @@ export default () => {
   }
 
   const renderPlannedDeck = async () => {
+    const currentDeck = editableDeck.value
+    if (!currentDeck) return null
+
+    aiTasksStore.setRenderState('loading')
+    aiTasksStore.setRenderError('')
+    aiTasksStore.setLastPolledAt('')
     step.value = 'generating'
     const task = await renderDeck({
-      topic: topic.value,
-      goalPageCount: plannedPageCount.value || goalPageCount.value,
-      language: language.value,
+      deck: currentDeck,
+      deckId: currentDeck.id,
+      topic: currentDeck.topic || topic.value,
+      goalPageCount: currentDeck.goalPageCount || plannedPageCount.value || goalPageCount.value,
+      language: currentDeck.language || language.value,
       overwrite: true,
     })
     aiTasksStore.setActiveTaskId(task.id)
 
-    const currentTask = await waitForTaskCompletion(task.id)
+    const currentTask = await pollAITaskUntilSettled(getAITask, task.id, {
+      intervalMs: 1000,
+      onPoll: () => aiTasksStore.setLastPolledAt(formatPollTime()),
+    })
 
     if (currentTask.status === 'succeeded' && currentTask.output) {
+      aiTasksStore.setRenderState('success')
       aiDeckStore.setRenderedDeck(currentTask.output.deck)
       const accepted = await acceptDeckRender({
         deckId: currentTask.output.deck.id,
@@ -71,6 +82,12 @@ export default () => {
       mainStore.setAIPPTDialogState(false)
       step.value = 'outline'
     }
+    else if (currentTask.status === 'failed') {
+      aiTasksStore.setRenderState('error')
+      aiTasksStore.setRenderError(currentTask.error || 'AI 制作失败，请重试')
+      message.error(currentTask.error || 'AI 制作失败，请重试')
+      step.value = 'outline'
+    }
 
     return currentTask
   }
@@ -78,6 +95,20 @@ export default () => {
   const resetToSetup = () => {
     step.value = 'setup'
     aiTasksStore.setPlanningState('idle')
+    aiTasksStore.setRenderState('idle')
+    aiTasksStore.setRenderError('')
+    aiTasksStore.setLastPolledAt('')
+  }
+
+  const updateOutlineSummary = (value: string) => aiDeckStore.updateOutlineSummary(value)
+  const updateSlideTitle = (slideId: string, value: string) => aiDeckStore.updateSlideTitle(slideId, value)
+  const updateSlideSummary = (slideId: string, value: string) => aiDeckStore.updateSlideSummary(slideId, value)
+  const updateSlideBullets = (slideId: string, value: string) => {
+    const bullets = value
+      .split('\n')
+      .map(item => item.trim())
+      .filter(Boolean)
+    aiDeckStore.updateSlideBullets(slideId, bullets)
   }
 
   return {
@@ -85,10 +116,16 @@ export default () => {
     topic,
     goalPageCount,
     language,
+    editableDeck,
+    lastPolledAt,
     outlineSlides,
     plannedPageCount,
     createPlan,
     renderPlannedDeck,
     resetToSetup,
+    updateOutlineSummary,
+    updateSlideTitle,
+    updateSlideSummary,
+    updateSlideBullets,
   }
 }

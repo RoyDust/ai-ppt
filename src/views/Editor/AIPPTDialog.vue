@@ -17,13 +17,17 @@
 
     <AIDeckOutlineReview
       v-else-if="step === 'outline'"
-      :slides="outlineSlides"
+      :deck="editableDeck"
       :plannedPageCount="plannedPageCount"
       @back="resetToSetup"
       @confirm="renderPlannedDeck"
+      @update:outline-summary="updateOutlineSummary"
+      @update:slide-title="updateSlideTitle"
+      @update:slide-summary="updateSlideSummary"
+      @update:slide-bullets="updateSlideBullets"
     />
 
-    <AIDeckGenerating v-else />
+    <AIDeckGenerating v-else :last-polled-at="lastPolledAt" />
   </div>
 </template>
 
@@ -38,11 +42,16 @@ const {
   topic,
   goalPageCount,
   language,
-  outlineSlides,
+  editableDeck,
+  lastPolledAt,
   plannedPageCount,
   createPlan,
   renderPlannedDeck,
   resetToSetup,
+  updateOutlineSummary,
+  updateSlideTitle,
+  updateSlideSummary,
+  updateSlideBullets,
 } = useAIDeckGeneration()
 </script>
 

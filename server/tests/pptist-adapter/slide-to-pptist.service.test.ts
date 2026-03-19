@@ -97,4 +97,44 @@ describe('SlideToPPTistService', () => {
     expect(stepCircle?.text?.content).toContain('1')
     expect(stepNo).toBeUndefined()
   })
+
+  it('renders timeline pages with alternating milestones and guide line', () => {
+    const service = new SlideToPPTistService()
+
+    const rendered = service.convert({
+      id: 'slide_timeline',
+      kind: 'content',
+      title: '足球如何走向世界',
+      summary: '按时间顺序看规则和职业化扩散。',
+      bullets: ['古代起源', '英国规则成型', '职业联赛出现', '世界杯推动全球化'],
+      regeneratable: true,
+      metadata: {
+        layoutTemplate: 'timeline_story',
+        pageNumber: 6,
+      },
+    })
+
+    expect(rendered.elements.some((element: any) => element.id === 'slide_timeline_timeline_line')).toBe(true)
+    expect(rendered.elements.filter((element: any) => String(element.id).includes('_milestone_')).length).toBe(4)
+  })
+
+  it('renders comparison pages with two contrasted columns', () => {
+    const service = new SlideToPPTistService()
+
+    const rendered = service.convert({
+      id: 'slide_compare',
+      kind: 'content',
+      title: '足球与冰球观看差异',
+      summary: '对比节奏、空间和身体对抗感受。',
+      bullets: ['足球更重阵型与空间控制', '冰球节奏更快且换人频繁'],
+      regeneratable: true,
+      metadata: {
+        layoutTemplate: 'compare_two_column',
+        pageNumber: 7,
+      },
+    })
+
+    expect(rendered.elements.some((element: any) => element.id === 'slide_compare_col_left')).toBe(true)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_compare_col_right')).toBe(true)
+  })
 })

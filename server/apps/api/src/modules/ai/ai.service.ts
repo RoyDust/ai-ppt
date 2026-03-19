@@ -26,19 +26,25 @@ export class AiService {
   async planDeck(payload: DeckPlanDto) {
     const result = await this.planDeckWithFallback(payload.topic, payload.goalPageCount, payload.language)
     return {
+      deck: result.deck,
       slides: result.deck.slides,
       plannedPageCount: result.deck.actualPageCount,
     }
   }
 
   async renderDeck(payload: DeckRenderDto & { topic?: string; goalPageCount?: number; language?: string; overwrite?: boolean }) {
-    const topic = payload.topic || payload.deckId || 'AI 演示文稿'
-    const goalPageCount = payload.goalPageCount || 6
-    const language = payload.language || 'zh-CN'
-    const { deck } = await this.planDeckWithFallback(topic, goalPageCount, language)
-    const rendered = this.deckRendererService?.render(deck) ?? { deck, slides: [] }
+    const inputDeck = payload.deck
+    const topic = payload.topic || inputDeck?.topic || payload.deckId || 'AI 演示文稿'
+    const goalPageCount = payload.goalPageCount || inputDeck?.goalPageCount || 6
+    const language = payload.language || inputDeck?.language || 'zh-CN'
+    const deck = inputDeck ?? (await this.planDeckWithFallback(topic, goalPageCount, language)).deck
 
-    return this.queueService.enqueue('deck_render', payload, rendered)
+    return this.queueService.enqueueAsync('deck_render', payload, async () => {
+      if (!this.deckRendererService) {
+        throw new Error('Deck renderer unavailable')
+      }
+      return this.deckRendererService.render(deck)
+    })
   }
 
   async regenerateSlide(payload: SlideRegenerateDto) {

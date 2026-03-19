@@ -3,6 +3,43 @@ import { describe, expect, it } from 'vitest'
 import { OpenAIProvider } from '../../libs/ai-orchestrator/src/providers/openai.provider'
 
 describe('OpenAIProvider', () => {
+  it('uses a diversified fallback template sequence without adjacent duplicates', async () => {
+    const provider = new OpenAIProvider()
+
+    const result = await provider.planDeck({
+      topic: '冰球入门',
+      goalPageCount: 10,
+      language: 'zh-CN',
+    })
+
+    const templates = result.deck.slides.map(slide => String(slide.metadata?.layoutTemplate))
+    expect(new Set(templates).size).toBeGreaterThanOrEqual(8)
+
+    for (let index = 1; index < templates.length; index++) {
+      expect(templates[index]).not.toBe(templates[index - 1])
+    }
+  })
+
+  it('builds topic-aligned fallback slides instead of leaking hockey-specific copy', async () => {
+    const provider = new OpenAIProvider()
+
+    const result = await provider.planDeck({
+      topic: '网球发展史',
+      goalPageCount: 10,
+      language: 'zh-CN',
+    })
+
+    const visibleText = result.deck.slides
+      .flatMap(slide => [slide.title, slide.summary, ...(slide.bullets ?? [])])
+      .join(' ')
+
+    expect(visibleText).toContain('网球')
+    expect(visibleText).not.toContain('冰球')
+    expect(visibleText).not.toContain('前锋')
+    expect(visibleText).not.toContain('守门员')
+    expect(visibleText).not.toContain('冰面')
+  })
+
   it('sanitizes meta prompt phrases out of visible slide text', async () => {
     const fetchImpl = async () => ({
       ok: true,
@@ -59,5 +96,81 @@ describe('OpenAIProvider', () => {
     const slide = result.deck.slides[0]
     expect(slide.summary).toBe('')
     expect(slide.bullets).toEqual(['真正内容：理解足球全球化的三条主线'])
+  })
+
+  it('renders an edited planning deck into a richer final deck through second-pass ai', async () => {
+    const fetchImpl = async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                id: 'deck_rendered_1',
+                topic: '网球发展史',
+                goalPageCount: 2,
+                actualPageCount: 2,
+                language: 'zh-CN',
+                outlineSummary: '从起源、定型到职业化的演进脉络',
+                slides: [
+                  {
+                    id: 'slide_1',
+                    kind: 'cover',
+                    title: '网球如何走向现代职业体系',
+                    subtitle: '从草地传统到全球职业巡回赛',
+                    summary: '用一页建立历史主线与观看抓手。',
+                    bullets: ['起源', '规则定型', '职业化扩张'],
+                    keyHighlights: ['草地传统', '规则统一', '公开赛时代'],
+                    bodySections: [
+                      { heading: '历史主线', text: '先看起源，再看规则定型，最后看职业化。' },
+                    ],
+                    regeneratable: true,
+                    metadata: {
+                      layoutTemplate: 'cover_photo',
+                      pageNumber: 1,
+                    },
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    }) as any
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'http://test.local/v1',
+      model: 'test-model',
+      fetchImpl,
+    })
+
+    const result = await provider.renderDeck({
+      deck: {
+        id: 'deck_plan_1',
+        topic: '网球发展史',
+        goalPageCount: 2,
+        actualPageCount: 2,
+        language: 'zh-CN',
+        outlineSummary: '用户编辑后的 planning deck',
+        slides: [
+          {
+            id: 'slide_1',
+            kind: 'cover',
+            title: '用户改过的封面标题',
+            summary: '用户改过的封面摘要',
+            bullets: ['起源', '职业化'],
+            regeneratable: true,
+          },
+        ],
+      },
+    } as any)
+
+    expect(result.deck.slides[0]?.title).toBe('网球如何走向现代职业体系')
+    expect((result.deck.slides[0] as any).subtitle).toBe('从草地传统到全球职业巡回赛')
+    expect((result.deck.slides[0] as any).keyHighlights).toEqual(['草地传统', '规则统一', '公开赛时代'])
+    expect((result.deck.slides[0] as any).bodySections).toEqual([
+      { heading: '历史主线', text: '先看起源，再看规则定型，最后看职业化。' },
+    ])
   })
 })

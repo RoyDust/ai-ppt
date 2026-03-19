@@ -26,6 +26,11 @@ type LayoutTemplate =
   | 'rules_grid_3x2'
   | 'split_image_list'
   | 'process_infographic'
+  | 'timeline_story'
+  | 'compare_two_column'
+  | 'stat_cards'
+  | 'role_cards'
+  | 'equipment_board'
   | 'warning_penalty'
   | 'summary_checklist'
 
@@ -60,19 +65,28 @@ const getPageNumber = (slide: AISlide) => {
 }
 
 const getBullets = (slide: AISlide, fallback: string[]) => {
-  const bullets = (slide.bullets ?? []).map(item => item.trim()).filter(Boolean)
+  const bullets = [
+    ...(slide.keyHighlights ?? []),
+    ...(slide.bullets ?? []),
+    ...((slide.bodySections ?? []).map(section => `${section.heading}：${section.text}`)),
+  ].map(item => item.trim()).filter(Boolean)
   return bullets.length ? bullets : fallback
 }
 
 const getSupportText = (slide: AISlide, fallback: string) => {
   const candidates = [
+    slide.subtitle,
     slide.summary,
     ...(slide.bullets ?? []).slice(0, 2),
+    ...((slide.bodySections ?? []).slice(0, 2).map(section => `${section.heading} ${section.text}`)),
   ].filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
 
   const joined = candidates.join(' ').trim()
   return clampText(joined || fallback, 60)
 }
+
+const getSubtitle = (slide: AISlide, fallback = '') =>
+  clampText((slide.subtitle || slide.summary || fallback).trim(), 46)
 
 const getTitleFontSize = (title: string, large = 28) => {
   if (title.length > 28) return large - 6
@@ -136,14 +150,27 @@ const titleBlock = (slide: AISlide) => ([
     fill: COLORS.blue,
   },
   {
-    id: `${slide.id}_summary`,
+    id: `${slide.id}_subtitle`,
     type: 'text',
     left: 72,
     top: 118,
     width: 740,
-    height: 42,
+    height: 26,
     rotate: 0,
-    content: paragraph(clampText(slide.summary || '', 92), 15, COLORS.slate),
+    content: paragraph(getSubtitle(slide), 14, COLORS.blue, true),
+    defaultFontName: FONT_CN,
+    defaultColor: COLORS.blue,
+    textType: 'content',
+  },
+  {
+    id: `${slide.id}_summary`,
+    type: 'text',
+    left: 72,
+    top: 144,
+    width: 740,
+    height: 34,
+    rotate: 0,
+    content: paragraph(clampText(slide.summary || getSupportText(slide, ''), 92), 15, COLORS.slate),
     defaultFontName: FONT_CN,
     defaultColor: COLORS.slate,
     textType: 'content',
@@ -219,14 +246,27 @@ const renderCoverPhoto = (slide: AISlide) => {
         textType: 'title',
       },
       {
+        id: `${slide.id}_subtitle`,
+        type: 'text',
+        left: 72,
+        top: 250,
+        width: 308,
+        height: 26,
+        rotate: 0,
+        content: paragraph(getSubtitle(slide), 14, COLORS.sky, true),
+        defaultFontName: FONT_CN,
+        defaultColor: COLORS.sky,
+        textType: 'content',
+      },
+      {
         id: `${slide.id}_summary`,
         type: 'text',
         left: 72,
-        top: 266,
+        top: 284,
         width: 308,
         height: 70,
         rotate: 0,
-        content: paragraph(clampText(slide.summary || '这份演示将帮助完全没看过比赛的人快速建立认知框架。', 72), 16, '#d7e4ec'),
+        content: paragraph(clampText(slide.summary || getSupportText(slide, '这份演示将帮助完全没看过比赛的人快速建立认知框架。'), 72), 16, '#d7e4ec'),
         defaultFontName: FONT_CN,
         defaultColor: '#d7e4ec',
         textType: 'content',
@@ -308,18 +348,31 @@ const renderSectionPhoto = (slide: AISlide) => ({
       defaultColor: COLORS.white,
       textType: 'title',
     },
-    {
-      id: `${slide.id}_summary`,
-      type: 'text',
-      left: 72,
-      top: 286,
-      width: 540,
-      height: 50,
-      rotate: 0,
-      content: paragraph(clampText(slide.summary || '', 78), 17, '#d7e4ec'),
-      defaultFontName: FONT_CN,
-      defaultColor: '#d7e4ec',
-      textType: 'content',
+      {
+        id: `${slide.id}_subtitle`,
+        type: 'text',
+        left: 72,
+        top: 286,
+        width: 540,
+        height: 24,
+        rotate: 0,
+        content: paragraph(getSubtitle(slide), 14, COLORS.yellow, true),
+        defaultFontName: FONT_CN,
+        defaultColor: COLORS.yellow,
+        textType: 'content',
+      },
+      {
+        id: `${slide.id}_summary`,
+        type: 'text',
+        left: 72,
+        top: 314,
+        width: 540,
+        height: 42,
+        rotate: 0,
+        content: paragraph(clampText(slide.summary || getSupportText(slide, ''), 78), 17, '#d7e4ec'),
+        defaultFontName: FONT_CN,
+        defaultColor: '#d7e4ec',
+        textType: 'content',
     },
     {
       id: `${slide.id}_slash`,
@@ -673,6 +726,364 @@ const renderProcessInfographic = (slide: AISlide) => {
   }
 }
 
+const renderTimelineStory = (slide: AISlide) => {
+  const bullets = getBullets(slide, ['起源', '规则', '职业化', '全球化']).slice(0, 4).map(item => clampText(item, 20))
+  return {
+    ...baseSlide(slide, COLORS.pale),
+    type: 'content',
+    elements: [
+      ...titleBlock(slide),
+      {
+        id: `${slide.id}_timeline_line`,
+        type: 'shape',
+        left: 474,
+        top: 176,
+        width: 8,
+        height: 270,
+        rotate: 0,
+        viewBox: [200, 200],
+        path: RECT_PATH,
+        fill: COLORS.blue,
+      },
+      ...bullets.flatMap((bullet, index) => {
+        const isLeft = index % 2 === 0
+        const top = 188 + index * 62
+        const cardLeft = isLeft ? 82 : 518
+        const circleLeft = 449
+        return [
+          {
+            id: `${slide.id}_milestone_${index + 1}`,
+            type: 'shape',
+            left: cardLeft,
+            top,
+            width: 320,
+            height: 54,
+            rotate: 0,
+            viewBox: [200, 200],
+            path: RECT_PATH,
+            fill: isLeft ? '#dff1f7' : '#fff0e3',
+          },
+          {
+            id: `${slide.id}_timeline_text_${index + 1}`,
+            type: 'text',
+            left: cardLeft + 18,
+            top: top + 14,
+            width: 282,
+            height: 24,
+            rotate: 0,
+            content: paragraph(bullet, 15, COLORS.navy, true),
+            defaultFontName: FONT_CN,
+            defaultColor: COLORS.navy,
+            textType: 'item',
+          },
+          {
+            id: `${slide.id}_timeline_dot_${index + 1}`,
+            type: 'shape',
+            left: circleLeft,
+            top: top + 10,
+            width: 38,
+            height: 38,
+            rotate: 0,
+            viewBox: [200, 200],
+            path: CIRCLE_PATH,
+            fill: isLeft ? COLORS.blue : COLORS.orange,
+            text: {
+              content: paragraph(String(index + 1), 14, COLORS.white, true, 'center'),
+              defaultFontName: FONT_CN,
+              defaultColor: COLORS.white,
+              align: 'middle',
+            },
+          },
+        ]
+      }),
+      ...pageBadge(slide, COLORS.orange),
+    ],
+  }
+}
+
+const renderCompareTwoColumn = (slide: AISlide) => {
+  const bullets = getBullets(slide, ['左侧观点', '右侧观点']).slice(0, 2).map(item => clampText(item, 42))
+  return {
+    ...baseSlide(slide, COLORS.white),
+    type: 'content',
+    elements: [
+      ...titleBlock(slide),
+      {
+        id: `${slide.id}_col_left`,
+        type: 'shape',
+        left: 72,
+        top: 188,
+        width: 356,
+        height: 252,
+        rotate: 0,
+        viewBox: [200, 200],
+        path: RECT_PATH,
+        fill: '#e7f6fb',
+      },
+      {
+        id: `${slide.id}_col_right`,
+        type: 'shape',
+        left: 532,
+        top: 188,
+        width: 356,
+        height: 252,
+        rotate: 0,
+        viewBox: [200, 200],
+        path: RECT_PATH,
+        fill: '#fff1e5',
+      },
+      {
+        id: `${slide.id}_divider`,
+        type: 'shape',
+        left: 472,
+        top: 188,
+        width: 16,
+        height: 252,
+        rotate: 0,
+        viewBox: [200, 200],
+        path: RECT_PATH,
+        fill: COLORS.navy,
+      },
+      {
+        id: `${slide.id}_left_title`,
+        type: 'text',
+        left: 96,
+        top: 212,
+        width: 120,
+        height: 24,
+        rotate: 0,
+        content: paragraph('对照 A', 16, COLORS.navy, true),
+        defaultFontName: FONT_CN,
+        defaultColor: COLORS.navy,
+        textType: 'itemTitle',
+      },
+      {
+        id: `${slide.id}_right_title`,
+        type: 'text',
+        left: 556,
+        top: 212,
+        width: 120,
+        height: 24,
+        rotate: 0,
+        content: paragraph('对照 B', 16, COLORS.navy, true),
+        defaultFontName: FONT_CN,
+        defaultColor: COLORS.navy,
+        textType: 'itemTitle',
+      },
+      {
+        id: `${slide.id}_left_body`,
+        type: 'text',
+        left: 96,
+        top: 258,
+        width: 308,
+        height: 112,
+        rotate: 0,
+        content: paragraph(bullets[0] || '左侧内容', 15, COLORS.navy),
+        defaultFontName: FONT_CN,
+        defaultColor: COLORS.navy,
+        textType: 'item',
+      },
+      {
+        id: `${slide.id}_right_body`,
+        type: 'text',
+        left: 556,
+        top: 258,
+        width: 308,
+        height: 112,
+        rotate: 0,
+        content: paragraph(bullets[1] || '右侧内容', 15, COLORS.navy),
+        defaultFontName: FONT_CN,
+        defaultColor: COLORS.navy,
+        textType: 'item',
+      },
+      ...pageBadge(slide, COLORS.blue),
+    ],
+  }
+}
+
+const renderStatCards = (slide: AISlide) => {
+  const bullets = getBullets(slide, ['指标一', '指标二', '指标三']).slice(0, 3).map(item => clampText(item, 22))
+  return {
+    ...baseSlide(slide, COLORS.light),
+    type: 'content',
+    elements: [
+      ...titleBlock(slide),
+      ...bullets.flatMap((bullet, index) => {
+        const left = 86 + index * 264
+        const accent = [COLORS.blue, COLORS.orange, COLORS.navy][index] || COLORS.blue
+        return [
+          {
+            id: `${slide.id}_stat_card_${index + 1}`,
+            type: 'shape',
+            left,
+            top: 214,
+            width: 220,
+            height: 180,
+            rotate: 0,
+            viewBox: [200, 200],
+            path: RECT_PATH,
+            fill: COLORS.white,
+          },
+          {
+            id: `${slide.id}_stat_bar_${index + 1}`,
+            type: 'shape',
+            left,
+            top: 214,
+            width: 220,
+            height: 10,
+            rotate: 0,
+            viewBox: [200, 200],
+            path: RECT_PATH,
+            fill: accent,
+          },
+          {
+            id: `${slide.id}_stat_no_${index + 1}`,
+            type: 'text',
+            left: left + 18,
+            top: 246,
+            width: 90,
+            height: 42,
+            rotate: 0,
+            content: paragraph(String(index + 1).padStart(2, '0'), 28, accent, true),
+            defaultFontName: FONT_CN,
+            defaultColor: accent,
+            textType: 'itemNumber',
+          },
+          {
+            id: `${slide.id}_stat_text_${index + 1}`,
+            type: 'text',
+            left: left + 18,
+            top: 314,
+            width: 182,
+            height: 54,
+            rotate: 0,
+            content: paragraph(bullet, 14, COLORS.navy, true),
+            defaultFontName: FONT_CN,
+            defaultColor: COLORS.navy,
+            textType: 'item',
+          },
+        ]
+      }),
+      ...pageBadge(slide, COLORS.orange),
+    ],
+  }
+}
+
+const renderRoleCards = (slide: AISlide) => {
+  const bullets = getBullets(slide, ['角色一', '角色二', '角色三']).slice(0, 3).map(item => clampText(item, 22))
+  return {
+    ...baseSlide(slide, COLORS.white),
+    type: 'content',
+    elements: [
+      ...titleBlock(slide),
+      ...bullets.flatMap((bullet, index) => {
+        const left = 80 + index * 266
+        return [
+          {
+            id: `${slide.id}_role_card_${index + 1}`,
+            type: 'shape',
+            left,
+            top: 206,
+            width: 226,
+            height: 214,
+            rotate: 0,
+            viewBox: [200, 200],
+            path: RECT_PATH,
+            fill: index === 1 ? '#fff4e8' : '#e8f2f7',
+          },
+          {
+            id: `${slide.id}_role_icon_${index + 1}`,
+            type: 'shape',
+            left: left + 82,
+            top: 226,
+            width: 60,
+            height: 60,
+            rotate: 0,
+            viewBox: [200, 200],
+            path: CIRCLE_PATH,
+            fill: index === 1 ? COLORS.orange : COLORS.blue,
+            text: {
+              content: paragraph(String(index + 1), 18, COLORS.white, true, 'center'),
+              defaultFontName: FONT_CN,
+              defaultColor: COLORS.white,
+              align: 'middle',
+            },
+          },
+          {
+            id: `${slide.id}_role_text_${index + 1}`,
+            type: 'text',
+            left: left + 24,
+            top: 314,
+            width: 178,
+            height: 52,
+            rotate: 0,
+            content: paragraph(bullet, 15, COLORS.navy, true, 'center'),
+            defaultFontName: FONT_CN,
+            defaultColor: COLORS.navy,
+            textType: 'item',
+          },
+        ]
+      }),
+      ...pageBadge(slide, COLORS.blue),
+    ],
+  }
+}
+
+const renderEquipmentBoard = (slide: AISlide) => {
+  const bullets = getBullets(slide, ['头盔', '护具', '球杆']).slice(0, 4).map(item => clampText(item, 24))
+  return {
+    ...baseSlide(slide, '#fefefe'),
+    type: 'content',
+    elements: [
+      ...titleBlock(slide),
+      {
+        id: `${slide.id}_equipment_panel`,
+        type: 'shape',
+        left: 72,
+        top: 192,
+        width: 330,
+        height: 246,
+        rotate: 0,
+        viewBox: [200, 200],
+        path: RECT_PATH,
+        fill: '#eef7fb',
+      },
+      ...bullets.flatMap((bullet, index) => [
+        {
+          id: `${slide.id}_equipment_tag_${index + 1}`,
+          type: 'shape',
+          left: 94,
+          top: 214 + index * 52,
+          width: 284,
+          height: 34,
+          rotate: 0,
+          viewBox: [200, 40],
+          path: CHIP_PATH,
+          fill: index % 2 === 0 ? COLORS.blue : COLORS.orange,
+          text: {
+            content: paragraph(bullet, 13, COLORS.white, true, 'center'),
+            defaultFontName: FONT_CN,
+            defaultColor: COLORS.white,
+            align: 'middle',
+          },
+        },
+      ]),
+      {
+        id: `${slide.id}_equipment_image`,
+        type: 'image',
+        src: PLACEHOLDER_IMAGE,
+        left: 460,
+        top: 192,
+        width: 396,
+        height: 246,
+        rotate: 0,
+        fixedRatio: false,
+      },
+      ...pageBadge(slide, COLORS.orange),
+    ],
+  }
+}
+
 const renderWarningPenalty = (slide: AISlide) => {
   const bullets = getBullets(slide, ['犯规类型', '处罚结果', '观看提示']).slice(0, 4).map(item => clampText(item, 26))
   return {
@@ -814,6 +1225,16 @@ export class SlideToPPTistService {
         return renderSplitImageList(slide)
       case 'process_infographic':
         return renderProcessInfographic(slide)
+      case 'timeline_story':
+        return renderTimelineStory(slide)
+      case 'compare_two_column':
+        return renderCompareTwoColumn(slide)
+      case 'stat_cards':
+        return renderStatCards(slide)
+      case 'role_cards':
+        return renderRoleCards(slide)
+      case 'equipment_board':
+        return renderEquipmentBoard(slide)
       case 'warning_penalty':
         return renderWarningPenalty(slide)
       case 'summary_checklist':
