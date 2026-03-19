@@ -5,6 +5,6 @@ export class DeckToSlidesService {
   constructor(private readonly slideToPPTistService = new SlideToPPTistService()) {}
 
   convert(deck: AIDeck) {
-    return deck.slides.map(slide => this.slideToPPTistService.convert(slide))
+    return deck.slides.map(slide => this.slideToPPTistService.convert(slide, deck))
   }
 }

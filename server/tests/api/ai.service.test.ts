@@ -18,6 +18,7 @@ describe('AiService', () => {
           actualPageCount: 8,
           language: 'zh-CN',
           outlineSummary: '面向零基础观众的冰球入门导览',
+          templateId: 'MASTER_TEMPLATE_AI',
           slides: [
             {
               id: 'slide_1',
@@ -25,7 +26,7 @@ describe('AiService', () => {
               title: '为什么冰球值得看',
               bullets: ['先看速度，再看对抗，再看节奏变化'],
               regeneratable: true,
-              metadata: { layoutTemplate: 'cover_photo' },
+              metadata: { layoutTemplate: 'master_cover' },
             },
             {
               id: 'slide_2',
@@ -33,7 +34,7 @@ describe('AiService', () => {
               title: '看懂一场比赛的最短路径',
               bullets: ['先认球门和换人区', '再认红蓝线和越位线', '最后看攻防转换'],
               regeneratable: true,
-              metadata: { layoutTemplate: 'process_infographic' },
+              metadata: { layoutTemplate: 'master_split' },
             },
           ],
         },
@@ -59,9 +60,10 @@ describe('AiService', () => {
     expect(planner.planDeck).toHaveBeenCalledWith('冰球入门', 8, 'zh-CN')
     expect(plan.plannedPageCount).toBe(8)
     expect(plan.deck.outlineSummary).toBe('面向零基础观众的冰球入门导览')
+    expect(plan.deck.templateId).toBe('MASTER_TEMPLATE_AI')
     expect(plan.slides[0].title).toBe('为什么冰球值得看')
     expect(plan.slides[1].bullets).toContain('再认红蓝线和越位线')
-    expect(plan.slides[1].metadata).toEqual({ layoutTemplate: 'process_infographic' })
+    expect(plan.slides[1].metadata).toEqual({ layoutTemplate: 'master_split' })
   })
 
   it('renders from the user-edited deck when deck payload is provided', async () => {
@@ -75,6 +77,7 @@ describe('AiService', () => {
       actualPageCount: 5,
       language: 'zh-CN',
       outlineSummary: '用户已经改过的规划稿',
+      templateId: 'MASTER_TEMPLATE_AI',
       slides: [
         {
           id: 'slide_1',
@@ -139,6 +142,7 @@ describe('AiService', () => {
           actualPageCount: 6,
           language: 'zh-CN',
           outlineSummary: '零基础冰球观赛导览',
+          templateId: 'MASTER_TEMPLATE_AI',
           slides: [{ id: 'slide_1', kind: 'cover', title: '冰球入门', regeneratable: true }],
         },
       })),
@@ -152,6 +156,7 @@ describe('AiService', () => {
           actualPageCount: 6,
           language: 'zh-CN',
           outlineSummary: '零基础冰球观赛导览',
+          templateId: 'MASTER_TEMPLATE_AI',
           slides: [{ id: 'slide_1', kind: 'cover', title: '冰球入门', regeneratable: true }],
         },
         slides: [
@@ -235,6 +240,7 @@ describe('AiService', () => {
         actualPageCount: 6,
         language: 'zh-CN',
         outlineSummary: '用户编辑稿',
+        templateId: 'MASTER_TEMPLATE_AI',
         slides: [],
       } as any,
       overwrite: true,

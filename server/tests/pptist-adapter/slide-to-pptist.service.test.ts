@@ -13,14 +13,20 @@ describe('SlideToPPTistService', () => {
       summary: '先看比赛目标，再看规则，再看节奏与换人。',
       bullets: ['目标：把球打进对方球门', '观赛重点：速度、对抗、空间', '先不追细节，先看整体节奏'],
       regeneratable: true,
+      metadata: {
+        layoutTemplate: 'master_cover',
+        pageNumber: 1,
+      },
     })
 
     expect(rendered.elements.length).toBeGreaterThan(3)
     expect(rendered.elements.some((element: any) => element.type === 'shape')).toBe(true)
     expect(rendered.elements.some((element: any) => element.type === 'text' && String(element.content).includes('冰球入门'))).toBe(true)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_1_overlay' && element.fill === '#161b27')).toBe(false)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_1_cover_panel')).toBe(true)
   })
 
-  it('renders rules into a 3x2 infographic grid with numbered cards and page badge', () => {
+  it('renders toc/grid pages with numbered info blocks and footer band', () => {
     const service = new SlideToPPTistService()
 
     const rendered = service.convert({
@@ -38,19 +44,18 @@ describe('SlideToPPTistService', () => {
       ],
       regeneratable: true,
       metadata: {
-        layoutTemplate: 'rules_grid_3x2',
+        layoutTemplate: 'master_toc',
         pageNumber: 5,
       },
     })
 
-    const ruleCards = rendered.elements.filter((element: any) => String(element.id).includes('_rule_card_'))
-    expect(ruleCards).toHaveLength(6)
-    expect(rendered.elements.some((element: any) => element.type === 'shape' && element.fill === '#219ebc')).toBe(true)
-    expect(rendered.elements.some((element: any) => element.type === 'shape' && element.fill === '#fb8500')).toBe(true)
-    expect(rendered.elements.some((element: any) => String(element.id).includes('page_badge'))).toBe(true)
+    const tocRows = rendered.elements.filter((element: any) => String(element.id).includes('_toc_no_'))
+    expect(tocRows.length).toBeGreaterThanOrEqual(4)
+    expect(rendered.elements.some((element: any) => String(element.id).includes('footer_band_purple'))).toBe(true)
+    expect(rendered.elements.some((element: any) => String(element.id).includes('page_number'))).toBe(true)
   })
 
-  it('renders split image/list pages with placeholder image, divider, and branded page badge', () => {
+  it('renders split pages with placeholder image, divider, and footer band', () => {
     const service = new SlideToPPTistService()
 
     const rendered = service.convert({
@@ -65,57 +70,36 @@ describe('SlideToPPTistService', () => {
       ],
       regeneratable: true,
       metadata: {
-        layoutTemplate: 'split_image_list',
+        layoutTemplate: 'master_split',
         pageNumber: 8,
       },
     })
 
     expect(rendered.elements.some((element: any) => element.type === 'image')).toBe(true)
-    expect(rendered.elements.some((element: any) => element.type === 'shape' && element.width <= 8 && element.fill === '#fb8500')).toBe(true)
-    expect(rendered.elements.some((element: any) => String(element.id).includes('page_badge'))).toBe(true)
+    expect(rendered.elements.some((element: any) => element.type === 'shape' && element.width <= 8 && element.fill === '#fd6525')).toBe(true)
+    expect(rendered.elements.some((element: any) => String(element.id).includes('page_number'))).toBe(true)
   })
 
-  it('renders process infographic step numbers inside circles rather than as separate text overlays', () => {
-    const service = new SlideToPPTistService()
-
-    const rendered = service.convert({
-      id: 'slide_process',
-      kind: 'content',
-      title: '比赛怎么进行',
-      summary: '从开球到得分的最短理解路径。',
-      bullets: ['争球开局', '攻防推进', '射门得分'],
-      regeneratable: true,
-      metadata: {
-        layoutTemplate: 'process_infographic',
-        pageNumber: 4,
-      },
-    })
-
-    const stepCircle = rendered.elements.find((element: any) => element.id === 'slide_process_step_circle_1') as any
-    const stepNo = rendered.elements.find((element: any) => element.id === 'slide_process_step_no_1')
-
-    expect(stepCircle?.text?.content).toContain('1')
-    expect(stepNo).toBeUndefined()
-  })
-
-  it('renders timeline pages with alternating milestones and guide line', () => {
+  it('renders timeline pages with milestone dots in circles', () => {
     const service = new SlideToPPTistService()
 
     const rendered = service.convert({
       id: 'slide_timeline',
       kind: 'content',
-      title: '足球如何走向世界',
-      summary: '按时间顺序看规则和职业化扩散。',
-      bullets: ['古代起源', '英国规则成型', '职业联赛出现', '世界杯推动全球化'],
+      title: '比赛历史时间线',
+      summary: '按时间顺序看发展主线。',
+      bullets: ['起源', '规则定型', '职业化', '全球化'],
       regeneratable: true,
       metadata: {
-        layoutTemplate: 'timeline_story',
-        pageNumber: 6,
+        layoutTemplate: 'master_timeline',
+        pageNumber: 4,
       },
     })
 
+    const stepCircle = rendered.elements.find((element: any) => element.id === 'slide_timeline_milestone_dot_1') as any
+
+    expect(stepCircle?.text?.content).toContain('1')
     expect(rendered.elements.some((element: any) => element.id === 'slide_timeline_timeline_line')).toBe(true)
-    expect(rendered.elements.filter((element: any) => String(element.id).includes('_milestone_')).length).toBe(4)
   })
 
   it('renders comparison pages with two contrasted columns', () => {
@@ -129,12 +113,35 @@ describe('SlideToPPTistService', () => {
       bullets: ['足球更重阵型与空间控制', '冰球节奏更快且换人频繁'],
       regeneratable: true,
       metadata: {
-        layoutTemplate: 'compare_two_column',
+        layoutTemplate: 'master_compare',
         pageNumber: 7,
       },
     })
 
-    expect(rendered.elements.some((element: any) => element.id === 'slide_compare_col_left')).toBe(true)
-    expect(rendered.elements.some((element: any) => element.id === 'slide_compare_col_right')).toBe(true)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_compare_compare_left')).toBe(true)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_compare_compare_right')).toBe(true)
+  })
+
+  it('renders table pages with structured header and rows', () => {
+    const service = new SlideToPPTistService()
+
+    const rendered = service.convert({
+      id: 'slide_table',
+      kind: 'content',
+      title: '项目周期',
+      summary: '按阶段拆解项目时间。',
+      bodySections: [
+        { heading: '前期沟通', text: '1 天，确认范围' },
+        { heading: '方案确认', text: '2 天，修订细节' },
+      ],
+      regeneratable: true,
+      metadata: {
+        layoutTemplate: 'master_table',
+        pageNumber: 9,
+      },
+    })
+
+    expect(rendered.elements.some((element: any) => element.id === 'slide_table_table_header_left')).toBe(true)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_table_table_heading_1')).toBe(true)
   })
 })

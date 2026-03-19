@@ -13,7 +13,8 @@ describe('OpenAIProvider', () => {
     })
 
     const templates = result.deck.slides.map(slide => String(slide.metadata?.layoutTemplate))
-    expect(new Set(templates).size).toBeGreaterThanOrEqual(8)
+    expect(result.deck.templateId).toBe('MASTER_TEMPLATE_AI')
+    expect(new Set(templates).size).toBeGreaterThanOrEqual(6)
 
     for (let index = 1; index < templates.length; index++) {
       expect(templates[index]).not.toBe(templates[index - 1])
@@ -68,7 +69,7 @@ describe('OpenAIProvider', () => {
                     ],
                     regeneratable: true,
                     metadata: {
-                      layoutTemplate: 'cover_photo',
+                      layoutTemplate: 'master_cover',
                       pageNumber: 1,
                     },
                   },
@@ -126,7 +127,7 @@ describe('OpenAIProvider', () => {
                     ],
                     regeneratable: true,
                     metadata: {
-                      layoutTemplate: 'cover_photo',
+                      layoutTemplate: 'master_cover',
                       pageNumber: 1,
                     },
                   },
@@ -172,5 +173,67 @@ describe('OpenAIProvider', () => {
     expect((result.deck.slides[0] as any).bodySections).toEqual([
       { heading: '历史主线', text: '先看起源，再看规则定型，最后看职业化。' },
     ])
+  })
+
+  it('falls back instead of hanging forever when plan request times out', async () => {
+    const fetchImpl = () => new Promise(() => undefined) as any
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'http://test.local/v1',
+      model: 'test-model',
+      fetchImpl,
+      requestTimeoutMs: 10,
+    } as any)
+
+    const outcome = await Promise.race([
+      provider.planDeck({
+        topic: '网球发展史',
+        goalPageCount: 8,
+        language: 'zh-CN',
+      }).then(result => result.deck.templateId),
+      new Promise(resolve => setTimeout(() => resolve('timed_out'), 50)),
+    ])
+
+    expect(outcome).toBe('MASTER_TEMPLATE_AI')
+  })
+
+  it('fails render instead of hanging forever when render request times out', async () => {
+    const fetchImpl = () => new Promise(() => undefined) as any
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'http://test.local/v1',
+      model: 'test-model',
+      fetchImpl,
+      requestTimeoutMs: 10,
+    } as any)
+
+    const outcome = await Promise.race([
+      provider.renderDeck({
+        deck: {
+          id: 'deck_plan_1',
+          topic: '网球发展史',
+          goalPageCount: 2,
+          actualPageCount: 2,
+          language: 'zh-CN',
+          outlineSummary: '用户编辑后的 planning deck',
+          templateId: 'MASTER_TEMPLATE_AI',
+          slides: [
+            {
+              id: 'slide_1',
+              kind: 'cover',
+              title: '用户改过的封面标题',
+              summary: '用户改过的封面摘要',
+              bullets: ['起源', '职业化'],
+              regeneratable: true,
+            },
+          ],
+        },
+      } as any).then(() => 'resolved').catch((error: Error) => error.message),
+      new Promise(resolve => setTimeout(() => resolve('timed_out'), 50)),
+    ])
+
+    expect(String(outcome)).toContain('timed out')
   })
 })

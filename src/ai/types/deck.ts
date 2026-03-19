@@ -8,6 +8,7 @@ export interface AIDeck {
   actualPageCount: number
   language: string
   outlineSummary: string
+  templateId?: string
   designSystem?: string
   themeName?: string
   designRequirements?: string[]
