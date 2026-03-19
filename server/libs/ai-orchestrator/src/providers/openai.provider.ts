@@ -386,6 +386,9 @@ export class OpenAIProvider implements LLMProvider {
               '中文字体固定 Microsoft YaHei，英文字体固定 Arial。',
               '所有页面必须服从 MASTER_TEMPLATE_AI 的商务提案母版风格、底部彩带页脚和统一留白系统。',
               '当适合做封面或章节页时允许使用占位大图，但不要依赖真实图片素材。',
+              '目录页必须给出 4 到 6 个具体主题项，不能只写抽象口号。',
+              '对比页必须给出左右两栏各自的明确标题与 1 到 2 句具体解释，不能只给一句短语。',
+              '表格页必须给出结构化条目，确保每行都能独立成立。',
             ].join('\n'),
           },
           {
@@ -448,6 +451,9 @@ export class OpenAIProvider implements LLMProvider {
             '中文字体固定 Microsoft YaHei，英文字体固定 Arial。',
             '所有页面都要有明确的设计感、层次感和视觉节奏，不能像纯文字讲义。',
             '所有页面必须服从 MASTER_TEMPLATE_AI 的商务提案母版风格、底部彩带页脚和统一留白系统。',
+            '如果选择 master_compare，必须输出 bodySections，且正好 2 项；每项都要有清晰 heading 和至少一句具体 text。',
+            '如果选择 master_table，优先输出 bodySections，确保每一行都对应可独立展示的信息。',
+            '如果选择 master_toc 或 master_grid，bullets 不能空洞，每条都要是可直接上版的具体信息。',
           ].join('\n'),
         },
         {

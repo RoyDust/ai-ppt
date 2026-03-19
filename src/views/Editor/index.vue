@@ -33,7 +33,8 @@
 
   <Modal
     :visible="!!showAIPPTDialog" 
-    :width="720"
+    :width="1180"
+    :contentStyle="{ height: '86vh', maxHeight: '90vh' }"
     :closeOnClickMask="false"
     :closeOnEsc="false"
     closeButton

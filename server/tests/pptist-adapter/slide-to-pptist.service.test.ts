@@ -24,6 +24,8 @@ describe('SlideToPPTistService', () => {
     expect(rendered.elements.some((element: any) => element.type === 'text' && String(element.content).includes('冰球入门'))).toBe(true)
     expect(rendered.elements.some((element: any) => element.id === 'slide_1_overlay' && element.fill === '#161b27')).toBe(false)
     expect(rendered.elements.some((element: any) => element.id === 'slide_1_cover_panel')).toBe(true)
+    const footerLabel = rendered.elements.find((element: any) => element.id === 'slide_1_footer_label')
+    expect(footerLabel?.top).toBeLessThan(510)
   })
 
   it('renders toc/grid pages with numbered info blocks and footer band', () => {
@@ -111,6 +113,10 @@ describe('SlideToPPTistService', () => {
       title: '足球与冰球观看差异',
       summary: '对比节奏、空间和身体对抗感受。',
       bullets: ['足球更重阵型与空间控制', '冰球节奏更快且换人频繁'],
+      bodySections: [
+        { heading: '个人突破 -> 团队体系', text: '足球的推进依赖个人处理球与整体阵型配合，观赛时要看持球点如何牵动整体站位。' },
+        { heading: '阵型更讲秩序', text: '足球的节奏更分层，防线、 midfield 和前场之间的距离变化，会直接决定空间是否被打开。' },
+      ],
       regeneratable: true,
       metadata: {
         layoutTemplate: 'master_compare',
@@ -120,6 +126,8 @@ describe('SlideToPPTistService', () => {
 
     expect(rendered.elements.some((element: any) => element.id === 'slide_compare_compare_left')).toBe(true)
     expect(rendered.elements.some((element: any) => element.id === 'slide_compare_compare_right')).toBe(true)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_compare_compare_left_title' && String(element.content).includes('个人突破'))).toBe(true)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_compare_compare_right_body' && String(element.content).includes('距离变化'))).toBe(true)
   })
 
   it('renders table pages with structured header and rows', () => {

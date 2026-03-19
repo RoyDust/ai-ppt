@@ -22,8 +22,15 @@ export default () => {
   const language = ref('zh-CN')
 
   const { editableDeck, plannedPageCount } = storeToRefs(aiDeckStore)
-  const { lastPolledAt } = storeToRefs(aiTasksStore)
+  const { lastPolledAt, planningState, renderState } = storeToRefs(aiTasksStore)
   const outlineSlides = computed(() => editableDeck.value?.slides ?? [])
+  const isPlanning = computed(() => planningState.value === 'loading')
+  const isRendering = computed(() => renderState.value === 'loading')
+  const loadingText = computed(() => {
+    if (isPlanning.value) return '正在生成大纲，请稍候...'
+    if (isRendering.value) return '正在创建 PPT，请稍候...'
+    return ''
+  })
 
   const formatPollTime = (date = new Date()) => {
     const hours = String(date.getHours()).padStart(2, '0')
@@ -34,15 +41,24 @@ export default () => {
 
   const createPlan = async (input: DeckPlanInput) => {
     aiTasksStore.setPlanningState('loading')
+    aiTasksStore.setRenderError('')
     topic.value = input.topic
     goalPageCount.value = input.goalPageCount
     language.value = input.language
 
-    const plan = await planDeck(input)
-    aiDeckStore.setPlan(plan)
-    aiTasksStore.setPlanningState('success')
-    step.value = 'outline'
-    return plan
+    try {
+      const plan = await planDeck(input)
+      aiDeckStore.setPlan(plan)
+      aiTasksStore.setPlanningState('success')
+      step.value = 'outline'
+      return plan
+    }
+    catch (error) {
+      aiTasksStore.setPlanningState('error')
+      const text = error instanceof Error ? error.message : 'AI 大纲生成失败，请重试'
+      message.error(text)
+      return null
+    }
   }
 
   const renderPlannedDeck = async () => {
@@ -53,43 +69,53 @@ export default () => {
     aiTasksStore.setRenderError('')
     aiTasksStore.setLastPolledAt('')
     step.value = 'generating'
-    const task = await renderDeck({
-      deck: currentDeck,
-      deckId: currentDeck.id,
-      topic: currentDeck.topic || topic.value,
-      goalPageCount: currentDeck.goalPageCount || plannedPageCount.value || goalPageCount.value,
-      language: currentDeck.language || language.value,
-      overwrite: true,
-    })
-    aiTasksStore.setActiveTaskId(task.id)
-
-    const currentTask = await pollAITaskUntilSettled(getAITask, task.id, {
-      intervalMs: 1000,
-      onPoll: () => aiTasksStore.setLastPolledAt(formatPollTime()),
-    })
-
-    if (currentTask.status === 'succeeded' && currentTask.output) {
-      aiTasksStore.setRenderState('success')
-      aiDeckStore.setRenderedDeck(currentTask.output.deck)
-      const accepted = await acceptDeckRender({
-        deckId: currentTask.output.deck.id,
-        createdBy: 'system',
-        sourceTaskId: currentTask.id,
-        pptistSlidesJson: currentTask.output.slides,
-        aiDeckJson: currentTask.output.deck,
+    try {
+      const task = await renderDeck({
+        deck: currentDeck,
+        deckId: currentDeck.id,
+        topic: currentDeck.topic || topic.value,
+        goalPageCount: currentDeck.goalPageCount || plannedPageCount.value || goalPageCount.value,
+        language: currentDeck.language || language.value,
+        overwrite: true,
       })
-      loadSlidesIntoEditor(accepted.slides, true)
-      mainStore.setAIPPTDialogState(false)
-      step.value = 'outline'
-    }
-    else if (currentTask.status === 'failed') {
-      aiTasksStore.setRenderState('error')
-      aiTasksStore.setRenderError(currentTask.error || 'AI 制作失败，请重试')
-      message.error(currentTask.error || 'AI 制作失败，请重试')
-      step.value = 'outline'
-    }
+      aiTasksStore.setActiveTaskId(task.id)
 
-    return currentTask
+      const currentTask = await pollAITaskUntilSettled(getAITask, task.id, {
+        intervalMs: 1000,
+        onPoll: () => aiTasksStore.setLastPolledAt(formatPollTime()),
+      })
+
+      if (currentTask.status === 'succeeded' && currentTask.output) {
+        aiTasksStore.setRenderState('success')
+        aiDeckStore.setRenderedDeck(currentTask.output.deck)
+        const accepted = await acceptDeckRender({
+          deckId: currentTask.output.deck.id,
+          createdBy: 'system',
+          sourceTaskId: currentTask.id,
+          pptistSlidesJson: currentTask.output.slides,
+          aiDeckJson: currentTask.output.deck,
+        })
+        loadSlidesIntoEditor(accepted.slides, true)
+        mainStore.setAIPPTDialogState(false)
+        step.value = 'outline'
+      }
+      else if (currentTask.status === 'failed') {
+        aiTasksStore.setRenderState('error')
+        aiTasksStore.setRenderError(currentTask.error || 'AI 制作失败，请重试')
+        message.error(currentTask.error || 'AI 制作失败，请重试')
+        step.value = 'outline'
+      }
+
+      return currentTask
+    }
+    catch (error) {
+      aiTasksStore.setRenderState('error')
+      const text = error instanceof Error ? error.message : 'AI 制作失败，请重试'
+      aiTasksStore.setRenderError(text)
+      message.error(text)
+      step.value = 'outline'
+      return null
+    }
   }
 
   const resetToSetup = () => {
@@ -118,6 +144,11 @@ export default () => {
     language,
     editableDeck,
     lastPolledAt,
+    planningState,
+    renderState,
+    isPlanning,
+    isRendering,
+    loadingText,
     outlineSlides,
     plannedPageCount,
     createPlan,

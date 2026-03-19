@@ -3,7 +3,19 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useMainStore } from '@/store/main'
 
 vi.mock('@/ai/services/aiDeck', () => ({
-  planDeck: vi.fn(() => Promise.resolve({ slides: [], plannedPageCount: 10 })),
+  planDeck: vi.fn(() => Promise.resolve({
+    deck: {
+      id: 'deck_1',
+      topic: '大学生职业生涯规划',
+      goalPageCount: 10,
+      actualPageCount: 10,
+      language: 'zh-CN',
+      outlineSummary: '',
+      slides: [],
+    },
+    slides: [],
+    plannedPageCount: 10,
+  })),
   renderDeck: vi.fn(() => Promise.resolve({ id: 'task_1', status: 'queued' })),
   acceptDeckRender: vi.fn(() => Promise.resolve({
     versionId: 'version_1',

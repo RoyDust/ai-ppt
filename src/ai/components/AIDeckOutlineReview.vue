@@ -1,10 +1,15 @@
 <template>
   <div class="ai-outline-review">
-    <div class="summary-panel">
-      <div>
-        <div class="summary">已规划 {{ plannedPageCount }} 页</div>
-        <div class="tip">此处编辑的是规划稿文案，后续 render 会严格基于这些内容生成 PPT。</div>
+    <section class="overview-card panel">
+      <div class="overview-head">
+        <div>
+          <div class="section-kicker">Outline Control</div>
+          <div class="summary">已规划 {{ plannedPageCount }} 页</div>
+          <div class="tip">此处编辑的是规划稿文案，后续 render 会严格基于这些内容生成 PPT。</div>
+        </div>
+        <div class="overview-chip">先校稿，再生成</div>
       </div>
+
       <div class="summary-field">
         <div class="field-label">全局摘要</div>
         <TextArea
@@ -16,13 +21,17 @@
           @update:value="$emit('update:outlineSummary', $event)"
         />
       </div>
-    </div>
+    </section>
 
-    <div class="slides" v-if="deck">
-      <div class="slide-card" v-for="(slide, index) in deck.slides" :key="slide.id">
+    <section class="slides-list slides" v-if="deck">
+      <div class="slide-card panel" v-for="(slide, index) in deck.slides" :key="slide.id">
         <div class="slide-header">
-          <div class="slide-index">第 {{ index + 1 }} 页</div>
-          <div class="slide-kind">{{ slide.kind }}</div>
+          <div class="slide-meta">
+            <div class="slide-index">第 {{ index + 1 }} 页</div>
+            <div class="slide-divider"></div>
+            <div class="slide-kind">{{ slide.kind }}</div>
+          </div>
+          <div class="slide-label">AI 规划块</div>
         </div>
 
         <div class="field">
@@ -34,36 +43,43 @@
           />
         </div>
 
-        <div class="field">
-          <div class="field-label">摘要</div>
-          <TextArea
-            :value="slide.summary || ''"
-            :rows="3"
-            :padding="10"
-            resizable
-            placeholder="请输入页面摘要"
-            @update:value="$emit('update:slideSummary', slide.id, $event)"
-          />
-        </div>
+        <div class="field two-col">
+          <div class="field-panel">
+            <div class="field-label">摘要</div>
+            <TextArea
+              :value="slide.summary || ''"
+              :rows="3"
+              :padding="10"
+              resizable
+              placeholder="请输入页面摘要"
+              @update:value="$emit('update:slideSummary', slide.id, $event)"
+            />
+          </div>
 
-        <div class="field">
-          <div class="field-label">要点</div>
-          <TextArea
-            :value="toBulletText(slide.bullets)"
-            :rows="4"
-            :padding="10"
-            resizable
-            placeholder="每行一个要点"
-            @update:value="$emit('update:slideBullets', slide.id, $event)"
-          />
+          <div class="field-panel">
+            <div class="field-label">要点</div>
+            <TextArea
+              :value="toBulletText(slide.bullets)"
+              :rows="4"
+              :padding="10"
+              resizable
+              placeholder="每行一个要点"
+              @update:value="$emit('update:slideBullets', slide.id, $event)"
+            />
+          </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="actions">
-      <Button @click="$emit('back')">返回</Button>
-      <Button type="primary" @click="$emit('confirm')">开始生成</Button>
-    </div>
+    <footer class="review-actions actions">
+      <div class="actions-copy">大纲确认后才会进入最终生成，本阶段不会直接写入编辑器。</div>
+      <div class="actions-buttons">
+        <Button :disabled="loading" @click="$emit('back')">返回</Button>
+        <Button type="primary" :disabled="loading" @click="$emit('confirm')">
+          {{ loading ? '正在创建 PPT...' : '开始生成' }}
+        </Button>
+      </div>
+    </footer>
   </div>
 </template>
 
@@ -76,6 +92,7 @@ import type { AIDeck } from '../types/deck'
 defineProps<{
   deck: AIDeck | null
   plannedPageCount: number
+  loading?: boolean
 }>()
 
 defineEmits<{
@@ -93,83 +110,174 @@ const toBulletText = (bullets?: string[]) => (bullets ?? []).join('\n')
 <style scoped lang="scss">
 .ai-outline-review {
   display: grid;
-  gap: 16px;
+  gap: 12px;
+  height: 100%;
+  padding: 16px;
 }
 
-.summary-panel {
+.panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.overview-card {
   display: grid;
   gap: 12px;
-  padding: 16px;
-  border: 1px solid #e6edf5;
-  border-radius: 12px;
-  background: #f8fbff;
+  padding: 14px 16px;
+}
+
+.overview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.section-kicker {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #d14424;
 }
 
 .summary {
-  font-size: 13px;
-  font-weight: 600;
-  color: #2c3e50;
+  margin-top: 6px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #20262e;
 }
 
 .tip {
   margin-top: 4px;
   font-size: 12px;
-  color: #6b7a90;
+  line-height: 1.5;
+  color: #6b7280;
+}
+
+.overview-chip {
+  padding: 6px 10px;
+  border: 1px solid #f1c3b7;
+  border-radius: 999px;
+  background: #fff6f3;
+  font-size: 12px;
+  color: #d14424;
 }
 
 .summary-field,
 .field {
   display: grid;
-  gap: 8px;
+  gap: 10px;
+}
+
+.field.two-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.field-panel {
+  padding: 14px;
+  border: 1px solid #eef0f3;
+  border-radius: 10px;
+  background: #fafafb;
 }
 
 .field-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #415a77;
+  font-size: 13px;
+  font-weight: 700;
+  color: #41464b;
 }
 
-.slides {
+.slides-list {
   display: grid;
-  gap: 14px;
-  max-height: 420px;
+  gap: 12px;
+  min-height: 0;
   overflow: auto;
-  padding-right: 4px;
+  padding-right: 6px;
 }
 
 .slide-card {
   display: grid;
   gap: 12px;
-  padding: 16px;
-  border: 1px solid #e8edf3;
-  border-radius: 12px;
-  background: #fff;
+  padding: 14px;
 }
 
 .slide-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.slide-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .slide-index {
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 700;
-  color: #023047;
+  color: #20262e;
+}
+
+.slide-divider {
+  width: 28px;
+  height: 1px;
+  background: #d1d5db;
 }
 
 .slide-kind {
-  padding: 4px 8px;
+  padding: 6px 10px;
   border-radius: 999px;
-  background: rgba(33, 158, 188, 0.12);
+  background: #f4f6f8;
   font-size: 12px;
-  color: #219ebc;
+  color: #6b7280;
   text-transform: capitalize;
 }
 
-.actions {
+.slide-label,
+.actions-copy {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.review-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.actions-buttons {
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 960px) {
+  .field.two-col {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 780px) {
+  .ai-outline-review {
+    padding: 16px;
+  }
+
+  .overview-head,
+  .review-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .actions-buttons {
+    justify-content: flex-end;
+  }
 }
 </style>
