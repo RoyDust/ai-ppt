@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { SlideToPPTistService } from '../../libs/pptist-adapter/src/slide-to-pptist.service'
 
 describe('SlideToPPTistService', () => {
-  it('creates a composed cover slide instead of an empty placeholder shell', () => {
+  it('renders cover slides with the strict MASTER_TEMPLATE_AI title-page structure', () => {
     const service = new SlideToPPTistService()
 
     const rendered = service.convert({
@@ -20,12 +20,15 @@ describe('SlideToPPTistService', () => {
     })
 
     expect(rendered.elements.length).toBeGreaterThan(3)
-    expect(rendered.elements.some((element: any) => element.type === 'shape')).toBe(true)
     expect(rendered.elements.some((element: any) => element.type === 'text' && String(element.content).includes('冰球入门'))).toBe(true)
-    expect(rendered.elements.some((element: any) => element.id === 'slide_1_overlay' && element.fill === '#161b27')).toBe(false)
-    expect(rendered.elements.some((element: any) => element.id === 'slide_1_cover_panel')).toBe(true)
-    const footerLabel = rendered.elements.find((element: any) => element.id === 'slide_1_footer_label')
-    expect(footerLabel?.top).toBeLessThan(510)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_1_cover_panel')).toBe(false)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_1_cover_panel_shadow')).toBe(false)
+    expect(rendered.elements.some((element: any) => String(element.id).includes('_chip_'))).toBe(false)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_1_topic')).toBe(false)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_1_title' && String(element.content).includes('项目计划书'))).toBe(true)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_1_logo_hint')).toBe(true)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_1_cover_divider')).toBe(true)
+    expect(rendered.elements.some((element: any) => element.id === 'slide_1_company_signature')).toBe(true)
   })
 
   it('renders toc/grid pages with numbered info blocks and footer band', () => {
