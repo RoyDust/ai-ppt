@@ -475,8 +475,82 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async regenerateSlide(input: SlideRegenerationContext): Promise<SlideRegenerationResult> {
-    const [slide] = buildFallbackSlides(input.prompt || '重新生成页面', 1)
-    return { slide }
+    const apiKey = this.options.apiKey ?? process.env.OPENAI_API_KEY
+    const baseURL = (this.options.baseURL ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '')
+
+    if (!apiKey) {
+      throw new Error('OpenAI API key missing for slide regenerate')
+    }
+
+    const currentTopic = input.topic || input.prompt || '重新生成页面'
+
+    try {
+      const json = await this.requestChatCompletion(baseURL, apiKey, {
+        model: this.model,
+        temperature: 0.85,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: [
+              '你是顶级 PPT 制作总监，负责对单页进行重写与重排，而不是只改几个词。',
+              '你收到的是整份演示的全局配置、当前页、邻页和整份大纲。',
+              '你的任务是只输出 1 页新的 slide JSON，用于替换当前页，同时保持与整份演示的主题、语气和模板风格一致。',
+              '输出 JSON，顶层字段必须是 slide。',
+              'slide 必须包含：id, kind, title, subtitle, summary, bullets, bodySections, keyHighlights, visualTone, imageIntent, regeneratable, designRequirements, designFeatures, layoutInstructions, validationResult, metadata。',
+              'bodySections 是数组，每项必须包含 heading 和 text。',
+              'keyHighlights 是数组，必须提供适合卡片、强调语或标签区展示的短句。',
+              'title、subtitle、summary、bullets、bodySections、keyHighlights 都是可见内容，绝对不要输出“副标题：”“关键词：”“设计说明：”“布局说明：”“提示：”这类标签化元文本。',
+              '不要把占位图说明、装饰说明、版式指令直接写进可见文本。',
+              '当前 PPT 实际页面内容是主要改写依据，必须优先继承当前页已经成立的信息结构、重点顺序和表达主题。',
+              '必须基于当前页和邻页上下文进行改写，避免与前后页重复，同时保持整份 deck 的逻辑连续性。',
+              '优先保持当前页的页面职责，不要把本页改写成与前后页无关的新章节。',
+              '优先沿用当前页的 layoutTemplate；只有在当前结构明显不适合承载新内容时，才允许调整。',
+              '如果用户指令存在，优先响应用户指令，但不能脱离全局主题。',
+              'templateId 固定为 MASTER_TEMPLATE_AI 的语境，布局风格必须服从母版体系。',
+              'layoutTemplate 只能从以下集合选择：master_cover, master_section, master_toc, master_timeline, master_split, master_grid, master_compare, master_table, master_summary, master_closing。',
+              `全局设计系统固定为 ${DEFAULT_DESIGN_SYSTEM}，严格使用配色 ${DESIGN_COLORS.join(' ')}`,
+              '中文字体固定 Microsoft YaHei，英文字体固定 Arial。',
+              '优先产出信息密度适中、可视化强、适合直接排版的内容块，而不是长段讲义。',
+            ].join('\n'),
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              task: 'regenerate_single_slide',
+              topic: input.topic,
+              language: input.language,
+              templateId: input.templateId,
+              designSystem: input.designSystem,
+              goalPageCount: input.goalPageCount,
+              outlineSummary: input.outlineSummary,
+              regenerateMode: input.regenerateMode,
+              instructions: input.prompt,
+              currentPptSlideSummary: input.currentPptSlideSummary,
+              currentSlide: input.currentSlide,
+              neighboringSlides: input.neighboringSlides,
+              deckOutline: input.deckOutline,
+            }),
+          },
+        ],
+      })
+      const content = json?.choices?.[0]?.message?.content
+      if (typeof content !== 'string') {
+        throw new Error('Missing model content for slide regenerate')
+      }
+
+      const parsed = extractJson(content)
+      const rawSlide = parsed.slide && typeof parsed.slide === 'object' ? parsed.slide : parsed
+      const slide = this.normalizeSlide(rawSlide, 0, currentTopic)
+      if (!slide) {
+        throw new Error('Invalid slide payload for slide regenerate')
+      }
+      return { slide: slide as unknown as Record<string, unknown> }
+    }
+    catch {
+      const [slide] = buildFallbackSlides(input.prompt || currentTopic, 1)
+      return { slide: slide as unknown as Record<string, unknown> }
+    }
   }
 
   private normalizeDeck(value: Record<string, unknown>, input: DeckPlanRequest | AIDeck): AIDeck {

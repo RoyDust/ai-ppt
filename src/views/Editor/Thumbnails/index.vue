@@ -347,7 +347,7 @@ const contextmenusThumbnailItem = (): ContextmenuItem[] => {
       text: '重新生成此页',
       handler: () => {
         mainStore.setAISlideRegenerateContext({
-          deckId: mainStore.databaseId,
+          deckId: mainStore.currentDeckId,
           slideId: currentSlide.value.id,
         })
         mainStore.setAISlideRegenerateDialogState(true)

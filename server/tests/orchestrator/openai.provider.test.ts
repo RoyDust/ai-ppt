@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { OpenAIProvider } from '../../libs/ai-orchestrator/src/providers/openai.provider'
 
@@ -173,6 +173,172 @@ describe('OpenAIProvider', () => {
     expect((result.deck.slides[0] as any).bodySections).toEqual([
       { heading: '历史主线', text: '先看起源，再看规则定型，最后看职业化。' },
     ])
+  })
+
+  it('renders a regenerated slide through the llm instead of local fallback', async () => {
+    const fetchImpl = async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                slide: {
+                  id: 'slide_regen_2',
+                  kind: 'content',
+                  title: '独居人群为什么会连带购买小家电',
+                  subtitle: '从单品选择转向场景组合',
+                  summary: '先解释触发场景，再说明功能互补和决策路径。',
+                  bullets: ['一人食场景驱动组合购买', '功能互补降低决策成本', '空间效率影响最终选择'],
+                  bodySections: [
+                    { heading: '触发场景', text: '做饭频率高、厨房空间有限时，组合购买意愿明显上升。' },
+                  ],
+                  keyHighlights: ['一人食', '功能互补', '省空间'],
+                  regeneratable: true,
+                  metadata: {
+                    layoutTemplate: 'master_split',
+                    pageNumber: 2,
+                  },
+                },
+              }),
+            },
+          },
+        ],
+      }),
+    }) as any
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'http://test.local/v1',
+      model: 'test-model',
+      fetchImpl,
+    })
+
+    const result = await provider.regenerateSlide({
+      deckId: 'deck_1',
+      slideId: 'slide_2',
+      topic: '独居人群家电关联购买研究',
+      language: 'zh-CN',
+      templateId: 'MASTER_TEMPLATE_AI',
+      designSystem: 'master-template-ai',
+      goalPageCount: 10,
+      outlineSummary: '理解关联购买动机与组合机会',
+      regenerateMode: 'content_and_layout',
+      prompt: '强调功能互补',
+      currentSlide: {
+        id: 'slide_2',
+        kind: 'content',
+        title: '原始页',
+      },
+      neighboringSlides: [
+        { id: 'slide_1', kind: 'cover', title: '封面' },
+        { id: 'slide_3', kind: 'summary', title: '总结' },
+      ],
+      deckOutline: [
+        { id: 'slide_1', kind: 'cover', title: '封面' },
+        { id: 'slide_2', kind: 'content', title: '原始页' },
+        { id: 'slide_3', kind: 'summary', title: '总结' },
+      ],
+    } as any)
+
+    expect(result.slide).toMatchObject({
+      id: 'slide_regen_2',
+      kind: 'content',
+      title: '独居人群为什么会连带购买小家电',
+      subtitle: '从单品选择转向场景组合',
+      summary: '先解释触发场景，再说明功能互补和决策路径。',
+      bullets: ['一人食场景驱动组合购买', '功能互补降低决策成本', '空间效率影响最终选择'],
+      keyHighlights: ['一人食', '功能互补', '省空间'],
+      metadata: {
+        layoutTemplate: 'master_split',
+        pageNumber: 2,
+      },
+    })
+  })
+
+  it('tells the llm to preserve the current slide role and layout context during regeneration', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                slide: {
+                  id: 'slide_regen_3',
+                  kind: 'content',
+                  title: '新的标题',
+                  summary: '新的摘要',
+                  bullets: ['新要点'],
+                  regeneratable: true,
+                  metadata: {
+                    layoutTemplate: 'master_split',
+                    pageNumber: 2,
+                  },
+                },
+              }),
+            },
+          },
+        ],
+      }),
+    })) as any
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'http://test.local/v1',
+      model: 'test-model',
+      fetchImpl,
+    })
+
+    await provider.regenerateSlide({
+      deckId: 'deck_1',
+      slideId: 'slide_2',
+      topic: '独居人群家电关联购买研究',
+      language: 'zh-CN',
+      templateId: 'MASTER_TEMPLATE_AI',
+      designSystem: 'master-template-ai',
+      goalPageCount: 10,
+      outlineSummary: '理解关联购买动机与组合机会',
+      regenerateMode: 'content_and_layout',
+      prompt: '强调功能互补',
+      currentSlide: {
+        id: 'slide_2',
+        kind: 'content',
+        title: '原始页',
+        metadata: {
+          layoutTemplate: 'master_split',
+          pageNumber: 2,
+        },
+      },
+      currentPptSlideSummary: {
+        title: '当前 PPT 标题',
+        summary: ['当前 PPT 摘要'],
+        bullets: ['当前 PPT 要点'],
+        textElements: [
+          { textType: 'title', text: '当前 PPT 标题', left: 84, top: 52, width: 640, height: 72 },
+          { textType: 'content', text: '当前 PPT 摘要', left: 84, top: 138, width: 620, height: 58 },
+        ],
+      },
+      neighboringSlides: [
+        { id: 'slide_1', kind: 'cover', title: '封面' },
+        { id: 'slide_3', kind: 'summary', title: '总结' },
+      ],
+      deckOutline: [
+        { id: 'slide_1', kind: 'cover', title: '封面' },
+        { id: 'slide_2', kind: 'content', title: '原始页' },
+        { id: 'slide_3', kind: 'summary', title: '总结' },
+      ],
+    } as any)
+
+    const requestPayload = JSON.parse(fetchImpl.mock.calls[0][1].body)
+    const systemPrompt = requestPayload.messages[0].content as string
+    const userPayload = JSON.parse(requestPayload.messages[1].content as string)
+
+    expect(systemPrompt).toContain('当前 PPT 实际页面内容是主要改写依据')
+    expect(systemPrompt).toContain('优先保持当前页的页面职责')
+    expect(systemPrompt).toContain('优先沿用当前页的 layoutTemplate')
+    expect(userPayload.currentPptSlideSummary.title).toBe('当前 PPT 标题')
+    expect(userPayload.currentSlide.metadata.layoutTemplate).toBe('master_split')
   })
 
   it('falls back instead of hanging forever when plan request times out', async () => {

@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common'
+import { Injectable, NotFoundException, Optional } from '@nestjs/common'
 import { QueueService } from '../../../../../libs/queue/src/queue.service'
 import { AITasksRepository } from '../../../../../libs/db/src/repositories/ai-tasks.repository'
 import { DeckVersionsRepository } from '../../../../../libs/db/src/repositories/deck-versions.repository'
@@ -10,6 +10,7 @@ import { DeckPlanDto } from './dto/deck-plan.dto'
 import { DeckRenderDto } from './dto/deck-render.dto'
 import { SlideRegenerateDto } from './dto/slide-regenerate.dto'
 import type { AIDeck } from '../../../../../libs/ai-schema/src/ai-deck'
+import type { DeckDetailDto, DeckListItemDto } from './dto/deck-list.dto'
 
 @Injectable()
 export class AiService {
@@ -22,6 +23,37 @@ export class AiService {
     @Optional() private readonly deckRendererService?: DeckRendererService,
     @Optional() private readonly slideRegeneratorService?: SlideRegeneratorService,
   ) {}
+
+  async listDecks(scope: { userId?: string; projectId?: string } = {}): Promise<DeckListItemDto[]> {
+    if (!this.decksRepository) {
+      return []
+    }
+
+    return this.decksRepository.listDeckSummaries({
+      ...scope,
+      limit: 50,
+    })
+  }
+
+  async getDeck(deckId: string): Promise<DeckDetailDto> {
+    if (!this.decksRepository) {
+      throw new NotFoundException(`Deck ${deckId} not found`)
+    }
+
+    const deck = await this.decksRepository.findDeckSummaryById(deckId)
+    if (!deck) {
+      throw new NotFoundException(`Deck ${deckId} not found`)
+    }
+
+    const currentVersion = deck.currentVersionId && this.deckVersionsRepository
+      ? await this.deckVersionsRepository.findById(deck.currentVersionId)
+      : null
+
+    return {
+      ...deck,
+      currentVersion,
+    }
+  }
 
   async planDeck(payload: DeckPlanDto) {
     const result = await this.planDeckWithFallback(payload.topic, payload.goalPageCount, payload.language)
@@ -52,6 +84,17 @@ export class AiService {
       deckId: payload.deckId,
       slideId: payload.slideId,
       prompt: payload.instructions,
+      topic: payload.topic,
+      language: payload.language,
+      templateId: payload.templateId,
+      designSystem: payload.designSystem,
+      goalPageCount: payload.goalPageCount,
+      outlineSummary: payload.outlineSummary,
+      regenerateMode: payload.regenerateMode,
+      currentPptSlideSummary: payload.currentPptSlideSummary,
+      currentSlide: payload.currentSlide,
+      deckOutline: payload.deckOutline,
+      neighboringSlides: [payload.previousSlide, payload.nextSlide].filter(Boolean) as Record<string, unknown>[],
     })
 
     return regenerated ?? {
@@ -98,30 +141,23 @@ export class AiService {
       }
     }
 
-    try {
-      const version = await this.deckVersionsRepository.createVersion({
-        deckId: payload.deckId,
-        createdBy: payload.createdBy,
-        sourceType: 'deck_render',
-        sourceTaskId: payload.sourceTaskId,
-        pptistSlidesJson: payload.pptistSlidesJson,
-        aiDeckJson: payload.aiDeckJson ?? null,
-      })
-      await this.decksRepository.updateCurrentVersion(payload.deckId, version.id)
-      return {
-        id: version.id,
-        versionId: version.id,
-        sourceType: 'deck_render',
-        slides: payload.pptistSlidesJson,
-      }
-    }
-    catch {
-      return {
-        id: payload.sourceTaskId,
-        versionId: payload.sourceTaskId,
-        sourceType: 'deck_render',
-        slides: payload.pptistSlidesJson,
-      }
+    await this.ensureDeckExists(payload.deckId, payload.createdBy, payload.aiDeckJson)
+
+    const version = await this.deckVersionsRepository.createVersion({
+      deckId: payload.deckId,
+      createdBy: payload.createdBy,
+      sourceType: 'deck_render',
+      sourceTaskId: payload.sourceTaskId,
+      pptistSlidesJson: payload.pptistSlidesJson,
+      aiDeckJson: payload.aiDeckJson ?? null,
+    })
+    await this.decksRepository.updateCurrentVersion(payload.deckId, version.id)
+    return {
+      id: version.id,
+      deckId: payload.deckId,
+      versionId: version.id,
+      sourceType: 'deck_render',
+      slides: payload.pptistSlidesJson,
     }
   }
 
@@ -140,31 +176,27 @@ export class AiService {
       }
     }
 
-    try {
-      const version = await this.deckVersionsRepository.createVersion({
-        deckId: payload.deckId,
-        createdBy: payload.createdBy,
-        sourceType: 'slide_regenerate',
-        sourceTaskId: payload.sourceTaskId,
-        parentVersionId: payload.parentVersionId,
-        pptistSlidesJson: payload.pptistSlidesJson,
-        aiDeckJson: payload.aiDeckJson ?? null,
-      })
-      await this.decksRepository.updateCurrentVersion(payload.deckId, version.id)
-      return {
-        id: version.id,
-        versionId: version.id,
-        sourceType: 'slide_regenerate',
-        slides: payload.pptistSlidesJson,
-      }
+    const parentVersion = await this.deckVersionsRepository.findById(payload.parentVersionId)
+    if (!parentVersion || parentVersion.deckId !== payload.deckId) {
+      throw new NotFoundException(`Parent version ${payload.parentVersionId} not found for deck ${payload.deckId}`)
     }
-    catch {
-      return {
-        id: payload.sourceTaskId,
-        versionId: payload.sourceTaskId,
-        sourceType: 'slide_regenerate',
-        slides: payload.pptistSlidesJson,
-      }
+
+    const version = await this.deckVersionsRepository.createVersion({
+      deckId: payload.deckId,
+      createdBy: payload.createdBy,
+      sourceType: 'slide_regenerate',
+      sourceTaskId: payload.sourceTaskId,
+      parentVersionId: payload.parentVersionId,
+      pptistSlidesJson: payload.pptistSlidesJson,
+      aiDeckJson: payload.aiDeckJson ?? null,
+    })
+    await this.decksRepository.updateCurrentVersion(payload.deckId, version.id)
+    return {
+      id: version.id,
+      versionId: version.id,
+      sourceType: 'slide_regenerate',
+      parentVersionId: payload.parentVersionId,
+      slides: payload.pptistSlidesJson,
     }
   }
 
@@ -184,5 +216,22 @@ export class AiService {
         slides: [],
       },
     }
+  }
+
+  private async ensureDeckExists(deckId: string, createdBy: string, aiDeckJson?: AIDeck) {
+    const existingDeck = await this.decksRepository?.findDeckSummaryById(deckId)
+    if (existingDeck || !this.decksRepository) return
+
+    const projectId = await this.decksRepository.findDefaultProjectIdByUserId(createdBy)
+    if (!projectId) {
+      throw new NotFoundException(`No project found for user ${createdBy}`)
+    }
+
+    await this.decksRepository.create({
+      id: deckId,
+      projectId,
+      userId: createdBy,
+      title: aiDeckJson?.topic || 'AI 演示文稿',
+    })
   }
 }

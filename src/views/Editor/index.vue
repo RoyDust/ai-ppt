@@ -46,7 +46,8 @@
 
   <Modal
     :visible="showAISlideRegenerateDialog"
-    :width="640"
+    :width="780"
+    :contentStyle="{ height: '88vh', maxHeight: '92vh' }"
     @closed="closeAISlideRegenerateDialog()"
   >
     <AISlideRegenerateDialog />

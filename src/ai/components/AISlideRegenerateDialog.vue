@@ -1,32 +1,87 @@
 <template>
   <div class="ai-slide-regenerate-dialog">
     <div class="header">
-      <div class="title">重新生成此页</div>
-      <div class="subtitle">先生成预览，再决定是否替换当前页或插入到后面。</div>
+      <div class="eyebrow">Single Slide Compare</div>
+      <div class="title-row">
+        <div class="title">重新生成此页</div>
+        <div class="status-chip">待确认替换</div>
+      </div>
+      <div class="subtitle">查看当前页与 AI 新方案的实际版面对比，确认后再覆盖。</div>
+      <div class="summary-pills">
+        <div class="summary-pill">{{ titleStatus }}</div>
+        <div class="summary-pill">{{ bulletStatus }}</div>
+        <div class="summary-pill">{{ structureStatus }}</div>
+      </div>
     </div>
 
-    <AISlidePreviewCard v-if="previewSlide" :slide="previewSlide" />
-    <div v-else class="empty">正在准备预览...</div>
+    <div class="compare-grid">
+      <div class="compare-panel">
+        <div class="panel-label">当前页面</div>
+        <ThumbnailSlide v-if="currentPPTSlide" class="slide-preview" :slide="currentPPTSlide" :size="620" />
+        <div v-else class="empty panel-empty">当前页面暂不可预览</div>
+      </div>
+
+      <div class="compare-panel">
+        <div class="panel-label">新生成页面</div>
+        <ThumbnailSlide v-if="previewPPTSlide" class="slide-preview" :slide="previewPPTSlide" :size="620" />
+        <div v-else class="empty panel-empty">正在准备新方案...</div>
+      </div>
+    </div>
 
     <div class="actions">
-      <Button @click="close()">关闭</Button>
-      <Button type="primary" @click="close()">替换当前页</Button>
-      <Button @click="close()">插入到当前页后</Button>
+      <Button @click="close()">保留当前页</Button>
+      <Button type="primary" :disabled="!previewSlide || accepting" @click="replaceCurrent()">
+        {{ accepting ? '正在替换...' : '替换为新页' }}
+      </Button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useMainStore } from '@/store'
+import { useMainStore, useSlidesStore } from '@/store'
+import { useAIDeckStore } from '@/ai/stores/aiDeck'
+import { renderAISlideToPPTistSlide } from '@/ai/adapters/renderSlide'
 import Button from '@/components/Button.vue'
-import AISlidePreviewCard from './AISlidePreviewCard.vue'
+import message from '@/utils/message'
+import ThumbnailSlide from '@/views/components/ThumbnailSlide/index.vue'
 import useAISlideRegeneration from '../hooks/useAISlideRegeneration'
 
 const mainStore = useMainStore()
-const { aiSlideRegenerateContext } = storeToRefs(mainStore)
-const { previewSlide, regenerateCurrentSlide, clearPreview } = useAISlideRegeneration()
+const slidesStore = useSlidesStore()
+const aiDeckStore = useAIDeckStore()
+const { aiSlideRegenerateContext, showAISlideRegenerateDialog } = storeToRefs(mainStore)
+const { previewSlide, regenerateCurrentSlide, acceptPreviewReplaceCurrent, clearPreview } = useAISlideRegeneration()
+const accepting = ref(false)
+const currentPPTSlide = computed(() => slidesStore.currentSlide ?? null)
+const currentAISlide = computed(() => {
+  const slideId = aiSlideRegenerateContext.value?.slideId
+  if (!slideId) return null
+  return aiDeckStore.renderedDeck?.slides.find(slide => slide.id === slideId) ?? null
+})
+const previewPPTSlide = computed(() => {
+  if (!previewSlide.value || !currentPPTSlide.value) return null
+  return renderAISlideToPPTistSlide(previewSlide.value, currentPPTSlide.value)
+})
+const titleStatus = computed(() => {
+  if (!previewSlide.value?.title) return '标题待生成'
+  if (!currentAISlide.value?.title) return '标题已生成'
+  return previewSlide.value.title !== currentAISlide.value.title ? '标题已重写' : '标题保持一致'
+})
+const bulletStatus = computed(() => {
+  const currentCount = currentAISlide.value?.bullets?.length ?? 0
+  const nextCount = previewSlide.value?.bullets?.length ?? 0
+  if (!previewSlide.value) return '要点待生成'
+  if (!currentCount && nextCount) return `新增 ${nextCount} 条要点`
+  if (currentCount === nextCount) return `保留 ${nextCount} 条要点`
+  return `要点 ${currentCount} → ${nextCount}`
+})
+const structureStatus = computed(() => {
+  const nextSections = previewSlide.value?.bodySections?.length ?? 0
+  if (!previewSlide.value) return '结构待分析'
+  return nextSections ? `分节 ${nextSections} 组` : '单页结构已重排'
+})
 
 const close = () => {
   mainStore.setAISlideRegenerateDialogState(false)
@@ -34,32 +89,177 @@ const close = () => {
   clearPreview()
 }
 
-onMounted(() => {
-  if (aiSlideRegenerateContext.value) {
-    regenerateCurrentSlide(aiSlideRegenerateContext.value)
+const replaceCurrent = async () => {
+  if (accepting.value) return
+
+  accepting.value = true
+  try {
+    const accepted = await acceptPreviewReplaceCurrent()
+    if (!accepted) {
+      message.error('当前页面暂时无法替换，请先确认演示文稿已保存')
+      return
+    }
+    close()
   }
-})
+  catch (error) {
+    const text = error instanceof Error ? error.message : '单页替换失败，请稍后重试'
+    message.error(text)
+  }
+  finally {
+    accepting.value = false
+  }
+}
+
+watch(
+  () => [showAISlideRegenerateDialog.value, aiSlideRegenerateContext.value?.deckId, aiSlideRegenerateContext.value?.slideId] as const,
+  async ([visible, deckId, slideId]) => {
+    if (!visible || !deckId || !slideId) return
+
+    clearPreview()
+
+    try {
+      await regenerateCurrentSlide({ deckId, slideId })
+    }
+    catch (error) {
+      const text = error instanceof Error ? error.message : '单页预览生成失败，请稍后重试'
+      message.error(text)
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped lang="scss">
 .ai-slide-regenerate-dialog {
   display: grid;
-  gap: 16px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.header {
+  display: grid;
+  gap: 8px;
+  padding: 2px 0 4px;
+}
+
+.eyebrow {
+  color: #6c7c90;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .title {
-  font-size: 18px;
+  font-size: 17px;
+  font-weight: 600;
+  color: #132238;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid #d7e4f2;
+  border-radius: 999px;
+  background: #f6f9fc;
+  color: #45607a;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .subtitle,
 .empty {
-  color: #666;
+  color: #66788a;
+}
+
+.summary-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.summary-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #f7f9fc 0%, #edf3f9 100%);
+  color: #253a51;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.compare-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+}
+
+.panel-label {
+  width: min(100%, 648px);
+  margin-bottom: 8px;
+  color: #32465d;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.slide-preview {
+  width: fit-content;
+  max-width: 100%;
+  padding: 12px;
+  border: 1px solid #d8e0ea;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  overflow: auto;
+}
+
+.panel-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  border: 1px dashed #cfd8e3;
+  border-radius: 14px;
+  background: #f8fafc;
+  flex: 1;
 }
 
 .actions {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #e6edf5;
+}
+
+@media (max-width: 960px) {
+  .ai-slide-regenerate-dialog {
+    gap: 10px;
+  }
 }
 </style>

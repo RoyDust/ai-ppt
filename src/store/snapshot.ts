@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import type { IndexableTypeArray } from 'dexie'
 import { db, type Snapshot } from '@/utils/database'
+import type { Slide } from '@/types/slides'
 
 import { useSlidesStore } from './slides'
 import { useMainStore } from './main'
@@ -41,6 +42,20 @@ export const useSnapshotStore = defineStore('snapshot', {
         slides: JSON.parse(JSON.stringify(slidesStore.slides)),
       }
       await db.snapshots.add(newFirstSnapshot)
+      this.setSnapshotCursor(0)
+      this.setSnapshotLength(1)
+    },
+
+    async resetSnapshotDatabase(slides?: Slide[]) {
+      const slidesStore = useSlidesStore()
+      const nextSlides = slides ?? slidesStore.slides
+      const nextIndex = Math.min(slidesStore.slideIndex, Math.max(nextSlides.length - 1, 0))
+
+      await db.snapshots.clear()
+      await db.snapshots.add({
+        index: nextIndex,
+        slides: JSON.parse(JSON.stringify(nextSlides)),
+      })
       this.setSnapshotCursor(0)
       this.setSnapshotLength(1)
     },

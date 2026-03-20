@@ -6,7 +6,7 @@ import { useAIDeckStore } from '../stores/aiDeck'
 import { useAITasksStore } from '../stores/aiTasks'
 import useAIDeckLoader from './useAIDeckLoader'
 import { acceptDeckRender, getAITask, planDeck, renderDeck } from '../services/aiDeck'
-import type { DeckPlanInput } from '../types/deck'
+import { normalizeDeckPlanInput, type DeckPlanInput } from '../types/deck'
 import { pollAITaskUntilSettled } from '../utils/taskPolling'
 
 export type AIDeckGenerationStep = 'setup' | 'outline' | 'generating'
@@ -40,14 +40,24 @@ export default () => {
   }
 
   const createPlan = async (input: DeckPlanInput) => {
+    const normalized = normalizeDeckPlanInput(input)
+    if (!normalized.ok) {
+      const text = normalized.errors.topic || normalized.errors.researchBrief || 'AI 大纲生成失败，请重试'
+      aiTasksStore.setPlanningState('error')
+      aiTasksStore.setRenderError(text)
+      message.error(text)
+      return null
+    }
+
+    const payload = normalized.payload
     aiTasksStore.setPlanningState('loading')
     aiTasksStore.setRenderError('')
-    topic.value = input.topic
-    goalPageCount.value = input.goalPageCount
-    language.value = input.language
+    topic.value = payload.topic
+    goalPageCount.value = payload.goalPageCount
+    language.value = payload.language
 
     try {
-      const plan = await planDeck(input)
+      const plan = await planDeck(payload)
       aiDeckStore.setPlan(plan)
       aiTasksStore.setPlanningState('success')
       step.value = 'outline'
@@ -95,6 +105,7 @@ export default () => {
           pptistSlidesJson: currentTask.output.slides,
           aiDeckJson: currentTask.output.deck,
         })
+        mainStore.setCurrentDeckContext(accepted.deckId || currentTask.output.deck.id, accepted.versionId)
         loadSlidesIntoEditor(accepted.slides, true)
         mainStore.setAIPPTDialogState(false)
         step.value = 'outline'

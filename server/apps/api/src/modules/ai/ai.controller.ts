@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common'
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { AiService } from './ai.service'
 import { DeckAcceptDto } from './dto/deck-accept.dto'
+import { DeckDetailDto, DeckListItemDto } from './dto/deck-list.dto'
 import { DeckPlanDto } from './dto/deck-plan.dto'
 import { DeckRenderDto } from './dto/deck-render.dto'
 import { SlideAcceptDto } from './dto/slide-accept.dto'
@@ -15,9 +16,27 @@ export class AiController {
     return this.aiService.planDeck(payload)
   }
 
+  @Get('decks')
+  listDecks(
+    @Query('userId') userId?: string,
+    @Query('projectId') projectId?: string,
+  ): Promise<DeckListItemDto[]> {
+    return this.aiService.listDecks({ userId, projectId })
+  }
+
+  @Get('decks/:deckId')
+  getDeck(@Param('deckId') deckId: string): Promise<DeckDetailDto> {
+    return this.aiService.getDeck(deckId)
+  }
+
   @Post('deck/render')
   renderDeck(@Body() payload: DeckRenderDto) {
     return this.aiService.renderDeck(payload)
+  }
+
+  @Post('slide/render')
+  renderSlide(@Body() payload: SlideRegenerateDto) {
+    return this.aiService.regenerateSlide(payload)
   }
 
   @Post('slide/regenerate')

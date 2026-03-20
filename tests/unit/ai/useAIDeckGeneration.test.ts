@@ -2,20 +2,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useMainStore } from '@/store/main'
 
-vi.mock('@/ai/services/aiDeck', () => ({
-  planDeck: vi.fn(() => Promise.resolve({
-    deck: {
-      id: 'deck_1',
-      topic: '大学生职业生涯规划',
-      goalPageCount: 10,
-      actualPageCount: 10,
-      language: 'zh-CN',
-      outlineSummary: '',
-      slides: [],
-    },
+const planDeckMock = vi.fn(() => Promise.resolve({
+  deck: {
+    id: 'deck_1',
+    topic: '大学生职业生涯规划',
+    goalPageCount: 10,
+    actualPageCount: 10,
+    language: 'zh-CN',
+    outlineSummary: '',
     slides: [],
-    plannedPageCount: 10,
-  })),
+  },
+  slides: [],
+  plannedPageCount: 10,
+}))
+
+vi.mock('@/ai/services/aiDeck', () => ({
+  planDeck: planDeckMock,
   renderDeck: vi.fn(() => Promise.resolve({ id: 'task_1', status: 'queued' })),
   acceptDeckRender: vi.fn(() => Promise.resolve({
     versionId: 'version_1',
@@ -42,6 +44,7 @@ vi.mock('@/ai/hooks/useAIDeckLoader', () => ({
 describe('useAIDeckGeneration', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    planDeckMock.mockClear()
   })
 
   it('moves to outline review after planning succeeds', async () => {
@@ -66,5 +69,47 @@ describe('useAIDeckGeneration', () => {
     )
     expect(mainStore.showAIPPTDialog).toBe(false)
     expect(generation.step.value).toBe('outline')
+  })
+
+  it('retains accepted deck and version identity after render accept', async () => {
+    const { default: useAIDeckGeneration } = await import('@/ai/hooks/useAIDeckGeneration')
+    const generation = useAIDeckGeneration()
+    const mainStore = useMainStore()
+
+    await generation.createPlan({ topic: '大学生职业生涯规划', goalPageCount: 10, language: 'zh-CN' })
+    await generation.renderPlannedDeck()
+
+    expect(mainStore.currentDeckId).toBe('deck_1')
+    expect(mainStore.currentVersionId).toBe('version_1')
+  })
+
+  it('normalizes research mode payloads before planning', async () => {
+    const { default: useAIDeckGeneration } = await import('@/ai/hooks/useAIDeckGeneration')
+    const generation = useAIDeckGeneration()
+
+    await generation.createPlan({
+      inputMode: 'research',
+      topic: '  2026 用户研究  ',
+      goalPageCount: 99,
+      language: 'zh-CN',
+      researchInput: {
+        projectBackground: ['  背景  ', ''],
+        projectObjectives: ['  目标一  ', '   ', '目标二'],
+        sampleDesign: [],
+        researchFramework: ['  框架  '],
+      },
+    })
+
+    expect(planDeckMock).toHaveBeenCalledWith({
+      inputMode: 'research',
+      topic: '2026 用户研究',
+      goalPageCount: 15,
+      language: 'zh-CN',
+      researchInput: {
+        projectBackground: ['背景'],
+        projectObjectives: ['目标一', '目标二'],
+        researchFramework: ['框架'],
+      },
+    })
   })
 })

@@ -2,14 +2,51 @@
   <div class="ai-setup-form">
     <section class="setup-hero panel">
       <div class="kicker">Prompt Intake</div>
+      <div class="mode-switch">
+        <Button
+          size="small"
+          type="checkbox"
+          first
+          :checked="inputMode === 'simple'"
+          @click="setInputMode('simple')"
+        >
+          简单模式
+        </Button>
+        <Button
+          size="small"
+          type="checkbox"
+          last
+          :checked="inputMode === 'research'"
+          @click="setInputMode('research')"
+        >
+          研究模式
+        </Button>
+      </div>
       <div class="topic-panel">
-        <div class="topic-label">主题输入</div>
-        <Input
-          v-model:value="localTopic"
-          class="topic-input"
-          placeholder="例如：2026 AI 产品战略路线图"
-          @enter="submit()"
-        />
+        <template v-if="inputMode === 'simple'">
+          <div class="topic-label">主题输入</div>
+          <Input
+            v-model:value="localTopic"
+            class="topic-input"
+            placeholder="例如：2026 AI 产品战略路线图"
+            @enter="submit()"
+          />
+          <div v-if="errors.topic" class="field-error">{{ errors.topic }}</div>
+        </template>
+        <template v-else>
+          <div class="topic-label">研究项目输入</div>
+          <textarea
+            v-model="researchBrief"
+            class="research-textarea"
+            placeholder="可粘贴 JSON，或按行填写背景 / 目标 / 研究框架。"
+          ></textarea>
+          <div class="research-toolbar">
+            <div class="field-note no-margin">支持 JSON 粘贴；格式不完整时会自动回退为文本拆分。</div>
+            <Button size="small" @click="fillResearchExample()">填入示例</Button>
+          </div>
+          <div v-if="warnings.researchBrief" class="field-warning">{{ warnings.researchBrief }}</div>
+          <div v-if="errors.researchBrief" class="field-error">{{ errors.researchBrief }}</div>
+        </template>
       </div>
     </section>
 
@@ -65,6 +102,13 @@ import { computed, ref } from 'vue'
 import Input from '@/components/Input.vue'
 import Select from '@/components/Select.vue'
 import Button from '@/components/Button.vue'
+import {
+  DEFAULT_AI_DECK_PAGE_COUNT,
+  normalizeDeckPlanInput,
+  normalizePageCount,
+  type AIPPTInputMode,
+  type DeckPlanInput,
+} from '@/ai/types/deck'
 
 const props = withDefaults(defineProps<{
   topic?: string
@@ -79,21 +123,54 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  submit: [payload: { topic: string; goalPageCount: number; language: string }]
+  submit: [payload: DeckPlanInput]
 }>()
 
 const localTopic = ref(props.topic)
 const localLanguage = ref(props.language)
 const pageCountText = ref(String(props.goalPageCount))
-const parsedPageCount = computed(() => Number(pageCountText.value) || 10)
+const inputMode = ref<AIPPTInputMode>('simple')
+const researchBrief = ref('')
+const errors = ref<Partial<Record<'topic' | 'researchBrief', string>>>({})
+const warnings = ref<Partial<Record<'researchBrief', string>>>({})
+const parsedPageCount = computed(() => {
+  const rawValue = pageCountText.value.trim()
+  if (!rawValue) return DEFAULT_AI_DECK_PAGE_COUNT
+  return normalizePageCount(Number(rawValue))
+})
+
+const setInputMode = (value: AIPPTInputMode) => {
+  inputMode.value = value
+  errors.value = {}
+  warnings.value = {}
+}
+
+const fillResearchExample = () => {
+  researchBrief.value = JSON.stringify({
+    projectBackground: ['现有用户对 AI 演示流程理解不一致', '需要把复杂调研需求收敛到稳定模板'],
+    projectObjectives: ['生成结构稳定的研究汇报', '减少封面和表格页的超载内容'],
+    researchFramework: ['用户分层', '方法设计', '核心发现', '业务建议'],
+  }, null, 2)
+}
 
 const submit = () => {
   if (props.loading) return
-  emit('submit', {
+
+  const normalized = normalizeDeckPlanInput({
+    inputMode: inputMode.value,
     topic: localTopic.value.trim(),
     goalPageCount: parsedPageCount.value,
     language: localLanguage.value,
+    researchBrief: researchBrief.value,
   })
+
+  errors.value = normalized.errors
+  warnings.value = normalized.warnings
+  if (!normalized.ok) return
+
+  localTopic.value = normalized.payload.topic
+  pageCountText.value = String(normalized.payload.goalPageCount)
+  emit('submit', normalized.payload)
 }
 </script>
 
@@ -115,6 +192,11 @@ const submit = () => {
 
 .setup-hero {
   padding: 24px;
+}
+
+.mode-switch {
+  display: inline-flex;
+  gap: 0;
 }
 
 .kicker {
@@ -188,9 +270,55 @@ const submit = () => {
   color: #6b7280;
 }
 
+.no-margin {
+  margin-top: 0;
+}
+
 .language {
   width: 100%;
   margin-top: 10px;
+}
+
+.research-textarea {
+  width: 100%;
+  min-height: 176px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #d9d9d9;
+  border-radius: 10px;
+  outline: 0;
+  resize: vertical;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #41464b;
+  background: #fff;
+
+  &:focus {
+    border-color: #d14424;
+  }
+}
+
+.research-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.field-error,
+.field-warning {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.field-error {
+  color: #b42318;
+}
+
+.field-warning {
+  color: #b54708;
 }
 
 .guidance-list {
@@ -242,6 +370,11 @@ const submit = () => {
 @media (max-width: 720px) {
   .ai-setup-form {
     padding: 16px;
+  }
+
+  .research-toolbar {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .control-grid {

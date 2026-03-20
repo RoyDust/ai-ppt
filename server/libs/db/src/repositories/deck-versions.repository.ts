@@ -13,6 +13,21 @@ interface CreateDeckVersionInput {
 export class DeckVersionsRepository {
   constructor(private readonly prisma: PrismaService | any) {}
 
+  findById(id: string) {
+    return this.prisma.deckVersion.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        deckId: true,
+        versionNo: true,
+        titleSnapshot: true,
+        actualPageCount: true,
+        aiDeckJson: true,
+        pptistSlidesJson: true,
+      },
+    })
+  }
+
   async createVersion(input: CreateDeckVersionInput) {
     const versionNo = await this.getNextVersionNo(input.deckId)
     return this.prisma.deckVersion.create({

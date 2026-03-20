@@ -1,1 +1,1 @@
-export { getAITask, planDeck, regenerateSlide, renderDeck } from '../services/aiDeck'
+export { getAITask, planDeck, renderDeck, renderSlide } from '../services/aiDeck'

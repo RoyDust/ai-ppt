@@ -8,6 +8,7 @@ import { type TextAttrs, defaultRichTextAttrs } from '@/utils/prosemirror/utils'
 import { useSlidesStore } from './slides'
 
 export interface MainState {
+  appView: 'hub' | 'editor'
   activeElementIdList: string[]
   handleElementId: string
   activeGroupElementId: string
@@ -41,6 +42,8 @@ export interface MainState {
   showAIPPTDialog: boolean | 'running'
   showAISlideRegenerateDialog: boolean
   aiSlideRegenerateContext: { deckId: string; slideId: string } | null
+  currentDeckId: string
+  currentVersionId: string
 }
 
 const nanoid = customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz')
@@ -48,6 +51,7 @@ export const databaseId = nanoid(10)
 
 export const useMainStore = defineStore('main', {
   state: (): MainState => ({
+    appView: 'hub',
     activeElementIdList: [], // 被选中的元素ID集合，包含 handleElementId
     handleElementId: '', // 正在操作的元素ID
     activeGroupElementId: '', // 组合元素成员中，被选中可独立操作的元素ID
@@ -81,6 +85,8 @@ export const useMainStore = defineStore('main', {
     showAIPPTDialog: false, // 打开AIPPT创建窗口
     showAISlideRegenerateDialog: false,
     aiSlideRegenerateContext: null,
+    currentDeckId: '',
+    currentVersionId: '',
   }),
 
   getters: {
@@ -100,6 +106,30 @@ export const useMainStore = defineStore('main', {
   },
 
   actions: {
+    setAppView(appView: 'hub' | 'editor') {
+      this.appView = appView
+    },
+
+    setCurrentDeckContext(deckId = '', versionId = '') {
+      this.currentDeckId = deckId
+      this.currentVersionId = versionId
+    },
+
+    resetEditorTransientState() {
+      this.activeElementIdList = []
+      this.handleElementId = ''
+      this.activeGroupElementId = ''
+      this.hiddenElementIdList = []
+      this.thumbnailsFocus = false
+      this.editorAreaFocus = false
+      this.disableHotkeys = false
+      this.selectedTableCells = []
+      this.selectedSlidesIndex = []
+      this.showAIPPTDialog = false
+      this.showAISlideRegenerateDialog = false
+      this.aiSlideRegenerateContext = null
+    },
+
     setActiveElementIdList(activeElementIdList: string[]) {
       if (activeElementIdList.length === 1) this.handleElementId = activeElementIdList[0]
       else this.handleElementId = ''
