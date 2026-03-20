@@ -7,6 +7,7 @@ import type {
   DeckPlanRequest,
   DeckPlanResult,
   LLMProvider,
+  ResearchProjectInput,
   SlideRegenerationResult,
 } from './llm-provider.interface'
 
@@ -16,6 +17,7 @@ export interface OpenAIProviderOptions {
   model?: string
   fetchImpl?: typeof fetch
   requestTimeoutMs?: number
+  searchFetcher?: (query: string) => Promise<Array<{ title: string, snippet: string, source?: string }>>
 }
 
 const DEFAULT_MODEL = 'gpt-4.1-mini'
@@ -24,6 +26,7 @@ const DESIGN_COLORS = ['#b50fb5', '#ffc300', '#fd6525', '#ef155f', '#75bd42']
 const DEFAULT_TEMPLATE_ID = 'MASTER_TEMPLATE_AI'
 const DEFAULT_DESIGN_SYSTEM = 'master-template-ai'
 const DEFAULT_THEME_NAME = 'MASTER_TEMPLATE_AI'
+const DEFAULT_SEARCH_ENDPOINT = 'https://api.duckduckgo.com/'
 
 type LayoutTemplate =
   | 'master_cover'
@@ -141,6 +144,67 @@ const sanitizeSectionList = (items: unknown) => {
     })
     .filter(Boolean) as Array<{ heading: string, text: string }>
 }
+
+const normalizeResearchItems = (items?: string[]) =>
+  (items ?? [])
+    .map(item => item.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+
+const digestResearchInput = (input: DeckPlanRequest) => {
+  const researchInput = input.researchInput
+  const blocks = [
+    ['项目背景', normalizeResearchItems(researchInput?.projectBackground)],
+    ['项目目标', normalizeResearchItems(researchInput?.projectObjectives)],
+    ['样本设计', normalizeResearchItems(researchInput?.sampleDesign)],
+    ['研究框架', normalizeResearchItems(researchInput?.researchFramework)],
+  ] as const
+
+  const structured = blocks
+    .filter(([, items]) => items.length)
+    .map(([label, items]) => `${label}：\n- ${items.join('\n- ')}`)
+
+  const brief = input.researchBrief?.trim()
+  if (brief) {
+    structured.push(`补充原文：\n${brief}`)
+  }
+
+  return structured.join('\n\n')
+}
+
+const extractPlanningKeywords = (input: DeckPlanRequest) => {
+  const researchInput = input.researchInput
+  const candidates = [
+    input.topic,
+    ...(researchInput?.projectBackground ?? []),
+    ...(researchInput?.projectObjectives ?? []),
+    ...(researchInput?.researchFramework ?? []),
+  ]
+
+  return Array.from(new Set(
+    candidates
+      .flatMap(value => value.split(/[，。；：、,.;:\s()（）]/))
+      .map(token => token.trim())
+      .filter(token => token.length >= 2),
+  )).slice(0, 12)
+}
+
+const buildResearchQueries = (input: DeckPlanRequest) => {
+  const topic = input.topic.trim()
+  const keywords = extractPlanningKeywords(input)
+  const baseQueries = [
+    `${topic} 定义 趋势 案例`,
+    `${topic} 市场 用户 场景`,
+    `${topic} 方法 框架 洞察`,
+  ]
+
+  if (keywords.length >= 2) {
+    baseQueries.push(`${keywords.slice(0, 4).join(' ')} 行业 洞察`)
+  }
+
+  return Array.from(new Set(baseQueries)).slice(0, 4)
+}
+
+const truncate = (value: string, max = 220) => value.length > max ? `${value.slice(0, max - 1).trim()}…` : value
 
 const buildFallbackSlides = (topic: string, goalPageCount: number) => {
   const actualCount = Math.max(8, Math.min(goalPageCount, 10))
@@ -353,6 +417,109 @@ export class OpenAIProvider implements LLMProvider {
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
   }
 
+  private async gatherExternalResearchContext(input: DeckPlanRequest) {
+    if (!this.options.searchFetcher && this.requestTimeoutMs < 100) {
+      return ''
+    }
+
+    const findings = await this.fetchSearchFindings(buildResearchQueries(input))
+    if (!findings.length) return ''
+
+    return findings
+      .slice(0, 6)
+      .map((item, index) => {
+        const source = item.source ? ` [${item.source}]` : ''
+        return `${index + 1}. ${truncate(item.title, 80)}${source}\n${truncate(item.snippet, 180)}`
+      })
+      .join('\n')
+  }
+
+  private async fetchSearchFindings(queries: string[]) {
+    const collected: Array<{ title: string, snippet: string, source?: string }> = []
+
+    for (const query of queries) {
+      try {
+        const items = this.options.searchFetcher
+          ? await this.options.searchFetcher(query)
+          : await this.defaultSearchFetcher(query)
+        collected.push(...items)
+      }
+      catch {
+        continue
+      }
+    }
+
+    const seen = new Set<string>()
+    return collected.filter((item) => {
+      const key = `${item.title}|${item.snippet}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return Boolean(item.title && item.snippet)
+    })
+  }
+
+  private async defaultSearchFetcher(query: string) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), Math.min(12000, this.requestTimeoutMs))
+    try {
+      const url = new URL(DEFAULT_SEARCH_ENDPOINT)
+      url.searchParams.set('q', query)
+      url.searchParams.set('format', 'json')
+      url.searchParams.set('no_redirect', '1')
+      url.searchParams.set('no_html', '1')
+      url.searchParams.set('skip_disambig', '1')
+
+      const response = await this.fetchImpl(url, {
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'pptist-ai-server/1.0',
+        },
+      }) as Promise<Response>
+
+      const timedResponse = await Promise.race([
+        response,
+        new Promise<null>(resolve => setTimeout(() => resolve(null), Math.min(12000, this.requestTimeoutMs))),
+      ])
+
+      if (!timedResponse || !timedResponse.ok) return []
+      const json = await timedResponse.json() as Record<string, unknown>
+      const results = [
+        ...(Array.isArray(json.Results) ? json.Results : []),
+        ...(Array.isArray(json.RelatedTopics) ? json.RelatedTopics : []),
+      ]
+
+      return results
+        .flatMap((item) => {
+          if (!item || typeof item !== 'object') return []
+          const record = item as Record<string, unknown>
+          if (Array.isArray(record.Topics)) {
+            return record.Topics as Array<Record<string, unknown>>
+          }
+          return [record]
+        })
+        .map((item) => ({
+          title: typeof item.Text === 'string'
+            ? item.Text.split(' - ')[0]?.trim() || query
+            : query,
+          snippet: typeof item.Text === 'string'
+            ? item.Text.trim()
+            : typeof item.Result === 'string'
+              ? item.Result.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+              : '',
+          source: typeof item.FirstURL === 'string' ? item.FirstURL : 'DuckDuckGo',
+        }))
+        .filter(item => item.snippet)
+        .slice(0, 4)
+    }
+    catch {
+      return []
+    }
+    finally {
+      clearTimeout(timeout)
+    }
+  }
+
   async planDeck(input: DeckPlanRequest): Promise<DeckPlanResult> {
     const apiKey = this.options.apiKey ?? process.env.OPENAI_API_KEY
     const baseURL = (this.options.baseURL ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '')
@@ -362,6 +529,8 @@ export class OpenAIProvider implements LLMProvider {
     }
 
     try {
+      const researchDigest = digestResearchInput(input)
+      const externalResearch = await this.gatherExternalResearchContext(input)
       const json = await this.requestChatCompletion(baseURL, apiKey, {
         model: this.model,
         temperature: 0.6,
@@ -389,6 +558,12 @@ export class OpenAIProvider implements LLMProvider {
               '目录页必须给出 4 到 6 个具体主题项，不能只写抽象口号。',
               '对比页必须给出左右两栏各自的明确标题与 1 到 2 句具体解释，不能只给一句短语。',
               '表格页必须给出结构化条目，确保每行都能独立成立。',
+              '如果用户提供了研究资料，必须优先提炼其中的事实、目标、样本、框架与限制条件，不能把这些材料忽略掉。',
+              '如果提供了外部检索补充，只能把它作为补强证据使用，不能压过用户原始输入。',
+              'outlineSummary 必须能概括核心问题、洞察路径与商业动作，不能写成空泛摘要。',
+              'slides 中每一页都必须有真实信息增量，例如：用户分层、行为逻辑、市场趋势、机会方向、案例对照、策略动作、验证路径。',
+              '禁止生成“背景介绍、现状分析、总结建议”这种万能废话页名，标题必须贴合主题语义。',
+              '如果输入是研究项目，必须把项目背景、目标、样本设计、研究框架转译成更适合汇报的叙事结构，而不是原文搬运。',
             ].join('\n'),
           },
           {
@@ -397,6 +572,10 @@ export class OpenAIProvider implements LLMProvider {
               `主题：${input.topic}`,
               `目标页数：${input.goalPageCount}`,
               `语言：${input.language}`,
+              `输入模式：${input.inputMode ?? 'simple'}`,
+              researchDigest ? `用户提供的研究材料：\n${researchDigest}` : '用户未提供额外研究材料。',
+              externalResearch ? `外部检索补充：\n${externalResearch}` : '外部检索补充：暂无可靠结果，请优先深挖用户输入。',
+              `主题关键词：${extractPlanningKeywords(input).join('、') || input.topic}`,
               '请返回适合制作美观简洁 PPT 的完整策划 JSON。',
             ].join('\n'),
           },

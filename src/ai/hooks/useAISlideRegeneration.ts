@@ -86,6 +86,13 @@ export default () => {
     return result
   }
 
+  const rerunPreview = async () => {
+    if (!lastInput.value) return null
+    const result = await renderSlide(lastInput.value)
+    previewSlide.value = result.slide
+    return result
+  }
+
   const acceptPreviewReplaceCurrent = async (): Promise<SlideAcceptResponse | null> => {
     const preview = previewSlide.value
     const currentSlide = slidesStore.currentSlide
@@ -140,6 +147,7 @@ export default () => {
   return {
     previewSlide,
     regenerateCurrentSlide,
+    rerunPreview,
     acceptPreviewReplaceCurrent,
     clearPreview,
   }

@@ -11,6 +11,7 @@ import { DeckRenderDto } from './dto/deck-render.dto'
 import { SlideRegenerateDto } from './dto/slide-regenerate.dto'
 import type { AIDeck } from '../../../../../libs/ai-schema/src/ai-deck'
 import type { DeckDetailDto, DeckListItemDto } from './dto/deck-list.dto'
+import type { QueueJob } from '../../../../../libs/queue/src/queue.service'
 
 @Injectable()
 export class AiService {
@@ -56,7 +57,7 @@ export class AiService {
   }
 
   async planDeck(payload: DeckPlanDto) {
-    const result = await this.planDeckWithFallback(payload.topic, payload.goalPageCount, payload.language)
+    const result = await this.planDeckWithFallback(payload)
     return {
       deck: result.deck,
       slides: result.deck.slides,
@@ -69,7 +70,11 @@ export class AiService {
     const topic = payload.topic || inputDeck?.topic || payload.deckId || 'AI 演示文稿'
     const goalPageCount = payload.goalPageCount || inputDeck?.goalPageCount || 6
     const language = payload.language || inputDeck?.language || 'zh-CN'
-    const deck = inputDeck ?? (await this.planDeckWithFallback(topic, goalPageCount, language)).deck
+    const deck = inputDeck ?? (await this.planDeckWithFallback({
+      topic,
+      goalPageCount,
+      language,
+    })).deck
 
     return this.queueService.enqueueAsync('deck_render', payload, async () => {
       if (!this.deckRendererService) {
@@ -131,25 +136,26 @@ export class AiService {
     deckId: string
     createdBy: string
     sourceTaskId: string
-    pptistSlidesJson: unknown[]
+    pptistSlidesJson?: unknown[]
     aiDeckJson?: AIDeck
   }) {
+    const resolved = this.resolveDeckAcceptPayload(payload)
     if (!this.deckVersionsRepository || !this.decksRepository) {
       return {
         versionId: payload.sourceTaskId,
-        slides: payload.pptistSlidesJson,
+        slides: resolved.pptistSlidesJson,
       }
     }
 
-    await this.ensureDeckExists(payload.deckId, payload.createdBy, payload.aiDeckJson)
+    await this.ensureDeckExists(payload.deckId, payload.createdBy, resolved.aiDeckJson)
 
     const version = await this.deckVersionsRepository.createVersion({
       deckId: payload.deckId,
       createdBy: payload.createdBy,
       sourceType: 'deck_render',
       sourceTaskId: payload.sourceTaskId,
-      pptistSlidesJson: payload.pptistSlidesJson,
-      aiDeckJson: payload.aiDeckJson ?? null,
+      pptistSlidesJson: resolved.pptistSlidesJson,
+      aiDeckJson: resolved.aiDeckJson ?? null,
     })
     await this.decksRepository.updateCurrentVersion(payload.deckId, version.id)
     return {
@@ -157,7 +163,7 @@ export class AiService {
       deckId: payload.deckId,
       versionId: version.id,
       sourceType: 'deck_render',
-      slides: payload.pptistSlidesJson,
+      slides: resolved.pptistSlidesJson,
     }
   }
 
@@ -200,19 +206,26 @@ export class AiService {
     }
   }
 
-  private async planDeckWithFallback(topic: string, goalPageCount: number, language: string) {
+  private async planDeckWithFallback(input: DeckPlanDto) {
     if (this.deckPlannerService) {
-      return this.deckPlannerService.planDeck(topic, goalPageCount, language)
+      return this.deckPlannerService.planDeck({
+        topic: input.topic,
+        goalPageCount: input.goalPageCount,
+        language: input.language,
+        inputMode: input.inputMode,
+        researchBrief: input.researchBrief,
+        researchInput: input.researchInput,
+      })
     }
 
     return {
       deck: {
         id: `deck_${Date.now()}`,
-        topic,
-        goalPageCount,
-        actualPageCount: Math.max(6, Math.min(goalPageCount, 10)),
-        language,
-        outlineSummary: `${topic} 规划`,
+        topic: input.topic,
+        goalPageCount: input.goalPageCount,
+        actualPageCount: Math.max(6, Math.min(input.goalPageCount, 10)),
+        language: input.language,
+        outlineSummary: `${input.topic} 规划`,
         slides: [],
       },
     }
@@ -233,5 +246,27 @@ export class AiService {
       userId: createdBy,
       title: aiDeckJson?.topic || 'AI 演示文稿',
     })
+  }
+
+  private resolveDeckAcceptPayload(payload: {
+    deckId: string
+    sourceTaskId: string
+    pptistSlidesJson?: unknown[]
+    aiDeckJson?: AIDeck
+  }) {
+    if (payload.pptistSlidesJson?.length) {
+      return {
+        pptistSlidesJson: payload.pptistSlidesJson,
+        aiDeckJson: payload.aiDeckJson,
+      }
+    }
+
+    const task = this.queueService.getJob(payload.sourceTaskId) as QueueJob<unknown> | null
+    const output = task?.status === 'succeeded' ? task.output as { deck?: AIDeck; slides?: unknown[] } | undefined : undefined
+
+    return {
+      pptistSlidesJson: output?.slides ?? [],
+      aiDeckJson: payload.aiDeckJson ?? output?.deck,
+    }
   }
 }

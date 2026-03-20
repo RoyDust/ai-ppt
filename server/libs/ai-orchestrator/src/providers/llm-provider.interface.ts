@@ -1,10 +1,20 @@
 import type { AIDeck } from '../../../ai-schema/src/ai-deck'
 import type { SlideRegenerationContext } from '../../../ai-schema/src/regeneration-context'
 
+export interface ResearchProjectInput {
+  projectBackground?: string[]
+  projectObjectives?: string[]
+  sampleDesign?: string[]
+  researchFramework?: string[]
+}
+
 export interface DeckPlanRequest {
   topic: string
   language: string
   goalPageCount: number
+  inputMode?: 'simple' | 'research'
+  researchBrief?: string
+  researchInput?: ResearchProjectInput
 }
 
 export interface DeckPlanResult {

@@ -99,6 +99,69 @@ describe('OpenAIProvider', () => {
     expect(slide.bullets).toEqual(['真正内容：理解足球全球化的三条主线'])
   })
 
+  it('injects user research input and external findings into the planning prompt', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                id: 'deck_1',
+                topic: '独居家电关联购买研究',
+                goalPageCount: 10,
+                actualPageCount: 10,
+                language: 'zh-CN',
+                outlineSummary: '围绕动机、场景、机会与策略形成结构化规划',
+                slides: [],
+              }),
+            },
+          },
+        ],
+      }),
+    })) as any
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'http://test.local/v1',
+      model: 'test-model',
+      fetchImpl,
+      searchFetcher: vi.fn(async () => [
+        {
+          title: '独居经济持续升温',
+          snippet: '公开报道显示，独居人群带动一人食、小家电与便捷消费场景增长。',
+          source: 'Example Source',
+        },
+      ]),
+    })
+
+    await provider.planDeck({
+      inputMode: 'research',
+      topic: '独居家电关联购买研究',
+      goalPageCount: 10,
+      language: 'zh-CN',
+      researchBrief: '项目背景：平台已观测到电饭煲+空气炸锅关联购买行为',
+      researchInput: {
+        projectBackground: ['平台已观测到电饭煲+空气炸锅关联购买行为'],
+        projectObjectives: ['挖掘独居用户关联购买的底层逻辑'],
+        sampleDesign: ['ezTest+ezTalk'],
+        researchFramework: ['购买组合与品类渗透现状分析'],
+      },
+    })
+
+    const requestPayload = JSON.parse(fetchImpl.mock.calls[0][1].body)
+    const systemPrompt = requestPayload.messages[0].content as string
+    const userPrompt = requestPayload.messages[1].content as string
+
+    expect(systemPrompt).toContain('如果用户提供了研究资料，必须优先提炼其中的事实')
+    expect(systemPrompt).toContain('禁止生成“背景介绍、现状分析、总结建议”这种万能废话页名')
+    expect(userPrompt).toContain('项目背景')
+    expect(userPrompt).toContain('项目目标')
+    expect(userPrompt).toContain('样本设计')
+    expect(userPrompt).toContain('外部检索补充')
+    expect(userPrompt).toContain('独居经济持续升温')
+  })
+
   it('renders an edited planning deck into a richer final deck through second-pass ai', async () => {
     const fetchImpl = async () => ({
       ok: true,

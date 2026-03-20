@@ -12,8 +12,8 @@ export const acceptDeckRender = async (payload: {
   deckId: string
   createdBy: string
   sourceTaskId: string
-  pptistSlidesJson: unknown[]
-  aiDeckJson: unknown
+  pptistSlidesJson?: unknown[]
+  aiDeckJson?: unknown
 }): Promise<DeckAcceptResponse> =>
   request.post('/api/ai/deck/accept', payload) as Promise<DeckAcceptResponse>
 

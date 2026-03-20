@@ -229,6 +229,66 @@ describe('AiService', () => {
     }))
   })
 
+  it('accepts deck render from queued task output without requiring large payload echoes', async () => {
+    const queueService = {
+      enqueue: vi.fn(),
+      getJob: vi.fn(() => ({
+        id: 'task_render_1',
+        type: 'deck_render',
+        status: 'succeeded',
+        output: {
+          deck: {
+            id: 'deck_runtime_1',
+            topic: 'AI 周报',
+            goalPageCount: 10,
+            actualPageCount: 10,
+            language: 'zh-CN',
+            outlineSummary: 'AI 周报规划',
+            slides: [],
+          },
+          slides: [{ id: 'slide_1' }],
+        },
+      })),
+    }
+    const decksRepository = {
+      findDeckSummaryById: vi.fn(async () => null),
+      findDefaultProjectIdByUserId: vi.fn(async () => 'system-project'),
+      create: vi.fn(async (data) => ({ ...data })),
+      updateCurrentVersion: vi.fn(async () => undefined),
+    }
+    const deckVersionsRepository = {
+      createVersion: vi.fn(async () => ({
+        id: 'version_1',
+      })),
+    }
+
+    const service = new AiService(
+      queueService as any,
+      undefined,
+      deckVersionsRepository as any,
+      decksRepository as any,
+      undefined,
+      undefined,
+      undefined,
+    )
+
+    const result = await service.acceptDeckRender({
+      deckId: 'deck_runtime_1',
+      createdBy: 'system',
+      sourceTaskId: 'task_render_1',
+    } as any)
+
+    expect(queueService.getJob).toHaveBeenCalledWith('task_render_1')
+    expect(deckVersionsRepository.createVersion).toHaveBeenCalledWith(expect.objectContaining({
+      pptistSlidesJson: [{ id: 'slide_1' }],
+      aiDeckJson: expect.objectContaining({
+        topic: 'AI 周报',
+      }),
+    }))
+    expect(result.versionId).toBe('version_1')
+    expect(result.slides).toEqual([{ id: 'slide_1' }])
+  })
+
   it('passes user and project scope into deck listing', async () => {
     const decksRepository = {
       listDeckSummaries: vi.fn(async () => []),
@@ -413,13 +473,74 @@ describe('AiService', () => {
       language: 'zh-CN',
     })
 
-    expect(planner.planDeck).toHaveBeenCalledWith('冰球入门', 8, 'zh-CN')
+    expect(planner.planDeck).toHaveBeenCalledWith({
+      topic: '冰球入门',
+      goalPageCount: 8,
+      language: 'zh-CN',
+      inputMode: undefined,
+      researchBrief: undefined,
+      researchInput: undefined,
+    })
     expect(plan.plannedPageCount).toBe(8)
     expect(plan.deck.outlineSummary).toBe('面向零基础观众的冰球入门导览')
     expect(plan.deck.templateId).toBe('MASTER_TEMPLATE_AI')
     expect(plan.slides[0].title).toBe('为什么冰球值得看')
     expect(plan.slides[1].bullets).toContain('再认红蓝线和越位线')
     expect(plan.slides[1].metadata).toEqual({ layoutTemplate: 'master_split' })
+  })
+
+  it('passes research mode input through to the deck planner', async () => {
+    const planner = {
+      planDeck: vi.fn(async () => ({
+        deck: {
+          id: 'deck_ai',
+          topic: '独居家电关联购买研究',
+          goalPageCount: 10,
+          actualPageCount: 10,
+          language: 'zh-CN',
+          outlineSummary: '围绕动机、组合、机会与策略展开',
+          slides: [],
+        },
+      })),
+    }
+
+    const service = new AiService(
+      { enqueue: vi.fn(), getJob: vi.fn() } as any,
+      undefined,
+      undefined,
+      undefined,
+      planner as any,
+      undefined,
+      undefined,
+    )
+
+    await service.planDeck({
+      inputMode: 'research',
+      topic: '独居家电关联购买研究',
+      goalPageCount: 10,
+      language: 'zh-CN',
+      researchBrief: '项目背景：观察到特定关联购买行为',
+      researchInput: {
+        projectBackground: ['观察到电饭煲+空气炸锅组合'],
+        projectObjectives: ['理解关联购买动机'],
+        sampleDesign: ['ezTest + ezTalk'],
+        researchFramework: ['购买组合与品类渗透现状分析'],
+      },
+    } as any)
+
+    expect(planner.planDeck).toHaveBeenCalledWith({
+      inputMode: 'research',
+      topic: '独居家电关联购买研究',
+      goalPageCount: 10,
+      language: 'zh-CN',
+      researchBrief: '项目背景：观察到特定关联购买行为',
+      researchInput: {
+        projectBackground: ['观察到电饭煲+空气炸锅组合'],
+        projectObjectives: ['理解关联购买动机'],
+        sampleDesign: ['ezTest + ezTalk'],
+        researchFramework: ['购买组合与品类渗透现状分析'],
+      },
+    })
   })
 
   it('renders from the user-edited deck when deck payload is provided', async () => {
@@ -553,7 +674,14 @@ describe('AiService', () => {
       overwrite: true,
     })
 
-    expect(planner.planDeck).toHaveBeenCalledWith('冰球入门', 6, 'zh-CN')
+    expect(planner.planDeck).toHaveBeenCalledWith({
+      topic: '冰球入门',
+      goalPageCount: 6,
+      language: 'zh-CN',
+      inputMode: undefined,
+      researchBrief: undefined,
+      researchInput: undefined,
+    })
     expect(renderer.render).toHaveBeenCalled()
     expect(enqueueAsync).toHaveBeenCalledWith(
       'deck_render',

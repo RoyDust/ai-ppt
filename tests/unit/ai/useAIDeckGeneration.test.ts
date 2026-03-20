@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useMainStore } from '@/store/main'
+import message from '@/utils/message'
 
 const planDeckMock = vi.fn(() => Promise.resolve({
   deck: {
@@ -41,10 +42,19 @@ vi.mock('@/ai/hooks/useAIDeckLoader', () => ({
   }),
 }))
 
+vi.mock('@/utils/message', () => ({
+  default: {
+    error: vi.fn(),
+    warning: vi.fn(),
+  },
+}))
+
 describe('useAIDeckGeneration', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     planDeckMock.mockClear()
+    vi.mocked(message.error).mockClear()
+    vi.mocked(message.warning).mockClear()
   })
 
   it('moves to outline review after planning succeeds', async () => {
@@ -69,6 +79,21 @@ describe('useAIDeckGeneration', () => {
     )
     expect(mainStore.showAIPPTDialog).toBe(false)
     expect(generation.step.value).toBe('outline')
+  })
+
+  it('accepts rendered deck by task id without reposting full slides payload', async () => {
+    const { acceptDeckRender } = await import('@/ai/services/aiDeck')
+    const { default: useAIDeckGeneration } = await import('@/ai/hooks/useAIDeckGeneration')
+    const generation = useAIDeckGeneration()
+
+    await generation.createPlan({ topic: '大学生职业生涯规划', goalPageCount: 10, language: 'zh-CN' })
+    await generation.renderPlannedDeck()
+
+    expect(acceptDeckRender).toHaveBeenCalledWith({
+      deckId: 'deck_1',
+      createdBy: 'system',
+      sourceTaskId: 'task_1',
+    })
   })
 
   it('retains accepted deck and version identity after render accept', async () => {
@@ -111,5 +136,34 @@ describe('useAIDeckGeneration', () => {
         researchFramework: ['框架'],
       },
     })
+  })
+
+  it('retries plan generation once and warns the user when the first attempt fails', async () => {
+    planDeckMock
+      .mockRejectedValueOnce(new Error('first failure'))
+      .mockResolvedValueOnce({
+        deck: {
+          id: 'deck_retry',
+          topic: '重试成功',
+          goalPageCount: 10,
+          actualPageCount: 10,
+          language: 'zh-CN',
+          outlineSummary: '重试后成功',
+          slides: [],
+        },
+        slides: [],
+        plannedPageCount: 10,
+      } as any)
+
+    const { default: useAIDeckGeneration } = await import('@/ai/hooks/useAIDeckGeneration')
+    const generation = useAIDeckGeneration()
+
+    const plan = await generation.createPlan({ topic: '大学生职业生涯规划', goalPageCount: 10, language: 'zh-CN' })
+
+    expect(planDeckMock).toHaveBeenCalledTimes(2)
+    expect(message.warning).toHaveBeenCalledWith('首次规划失败，正在自动重试...')
+    expect(message.error).not.toHaveBeenCalled()
+    expect(plan?.deck.id).toBe('deck_retry')
+    expect(generation.step.value).toBe('outline')
   })
 })

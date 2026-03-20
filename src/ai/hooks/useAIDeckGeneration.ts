@@ -7,6 +7,7 @@ import { useAITasksStore } from '../stores/aiTasks'
 import useAIDeckLoader from './useAIDeckLoader'
 import { acceptDeckRender, getAITask, planDeck, renderDeck } from '../services/aiDeck'
 import { normalizeDeckPlanInput, type DeckPlanInput } from '../types/deck'
+import type { DeckPlanResponse } from '../types/deck'
 import { pollAITaskUntilSettled } from '../utils/taskPolling'
 
 export type AIDeckGenerationStep = 'setup' | 'outline' | 'generating'
@@ -57,7 +58,20 @@ export default () => {
     language.value = payload.language
 
     try {
-      const plan = await planDeck(payload)
+      const requestPlan = async (attempt: number): Promise<DeckPlanResponse> => {
+        try {
+          return await planDeck(payload)
+        }
+        catch (error) {
+          if (attempt === 0) {
+            message.warning('首次规划失败，正在自动重试...')
+            return requestPlan(1)
+          }
+          throw error
+        }
+      }
+
+      const plan = await requestPlan(0)
       aiDeckStore.setPlan(plan)
       aiTasksStore.setPlanningState('success')
       step.value = 'outline'
@@ -102,8 +116,6 @@ export default () => {
           deckId: currentTask.output.deck.id,
           createdBy: 'system',
           sourceTaskId: currentTask.id,
-          pptistSlidesJson: currentTask.output.slides,
-          aiDeckJson: currentTask.output.deck,
         })
         mainStore.setCurrentDeckContext(accepted.deckId || currentTask.output.deck.id, accepted.versionId)
         loadSlidesIntoEditor(accepted.slides, true)

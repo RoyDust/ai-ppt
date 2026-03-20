@@ -23,14 +23,21 @@
 
       <div class="compare-panel">
         <div class="panel-label">新生成页面</div>
-        <ThumbnailSlide v-if="previewPPTSlide" class="slide-preview" :slide="previewPPTSlide" :size="620" />
+        <div v-if="regenerating" class="panel-loading">
+          <div class="loading-dot"></div>
+          <div class="loading-text">正在生成新页面...</div>
+        </div>
+        <ThumbnailSlide v-else-if="previewPPTSlide" class="slide-preview" :slide="previewPPTSlide" :size="620" />
         <div v-else class="empty panel-empty">正在准备新方案...</div>
       </div>
     </div>
 
     <div class="actions">
-      <Button @click="close()">保留当前页</Button>
-      <Button type="primary" :disabled="!previewSlide || accepting" @click="replaceCurrent()">
+      <Button :disabled="regenerating || accepting" @click="rejectResult()">拒绝结果</Button>
+      <Button :disabled="regenerating || accepting || !canRetry" @click="retryRegeneration()">
+        {{ regenerating ? '正在重新生成...' : '重新来一次' }}
+      </Button>
+      <Button type="primary" :disabled="!previewSlide || accepting || regenerating" @click="replaceCurrent()">
         {{ accepting ? '正在替换...' : '替换为新页' }}
       </Button>
     </div>
@@ -52,9 +59,11 @@ const mainStore = useMainStore()
 const slidesStore = useSlidesStore()
 const aiDeckStore = useAIDeckStore()
 const { aiSlideRegenerateContext, showAISlideRegenerateDialog } = storeToRefs(mainStore)
-const { previewSlide, regenerateCurrentSlide, acceptPreviewReplaceCurrent, clearPreview } = useAISlideRegeneration()
+const { previewSlide, regenerateCurrentSlide, rerunPreview, acceptPreviewReplaceCurrent, clearPreview } = useAISlideRegeneration()
 const accepting = ref(false)
+const regenerating = ref(false)
 const currentPPTSlide = computed(() => slidesStore.currentSlide ?? null)
+const canRetry = computed(() => Boolean(aiSlideRegenerateContext.value?.deckId && aiSlideRegenerateContext.value?.slideId))
 const currentAISlide = computed(() => {
   const slideId = aiSlideRegenerateContext.value?.slideId
   if (!slideId) return null
@@ -89,8 +98,46 @@ const close = () => {
   clearPreview()
 }
 
+const rejectResult = () => {
+  close()
+}
+
+const requestPreview = async (mode: 'initial' | 'retry') => {
+  regenerating.value = true
+  try {
+    if (mode === 'retry') {
+      const retried = await rerunPreview()
+      if (!retried) {
+        message.error('当前结果暂时无法重新生成，请关闭后重试')
+      }
+      return
+    }
+
+    const deckId = aiSlideRegenerateContext.value?.deckId
+    const slideId = aiSlideRegenerateContext.value?.slideId
+    if (!deckId || !slideId) return
+    await regenerateCurrentSlide({ deckId, slideId })
+  }
+  catch (error) {
+    const text = error instanceof Error
+      ? error.message
+      : mode === 'retry'
+        ? '重新生成失败，请稍后重试'
+        : '单页预览生成失败，请稍后重试'
+    message.error(text)
+  }
+  finally {
+    regenerating.value = false
+  }
+}
+
+const retryRegeneration = async () => {
+  if (regenerating.value || accepting.value) return
+  await requestPreview('retry')
+}
+
 const replaceCurrent = async () => {
-  if (accepting.value) return
+  if (accepting.value || regenerating.value) return
 
   accepting.value = true
   try {
@@ -116,14 +163,7 @@ watch(
     if (!visible || !deckId || !slideId) return
 
     clearPreview()
-
-    try {
-      await regenerateCurrentSlide({ deckId, slideId })
-    }
-    catch (error) {
-      const text = error instanceof Error ? error.message : '单页预览生成失败，请稍后重试'
-      message.error(text)
-    }
+    await requestPreview('initial')
   },
   { immediate: true },
 )
@@ -249,6 +289,35 @@ watch(
   flex: 1;
 }
 
+.panel-loading {
+  display: flex;
+  flex: 1;
+  width: min(100%, 648px);
+  min-height: 220px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 1px dashed #cfd8e3;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f3f7fb 100%);
+}
+
+.loading-dot {
+  width: 34px;
+  height: 34px;
+  border: 3px solid #dbe6f1;
+  border-top-color: #4d86c6;
+  border-radius: 50%;
+  animation: ai-slide-spin 0.9s linear infinite;
+}
+
+.loading-text {
+  color: #5b7189;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .actions {
   display: flex;
   justify-content: flex-end;
@@ -260,6 +329,15 @@ watch(
 @media (max-width: 960px) {
   .ai-slide-regenerate-dialog {
     gap: 10px;
+  }
+}
+
+@keyframes ai-slide-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

@@ -4,6 +4,6 @@ export class DeckAcceptDto {
   deckId!: string
   createdBy!: string
   sourceTaskId!: string
-  pptistSlidesJson!: unknown[]
+  pptistSlidesJson?: unknown[]
   aiDeckJson?: AIDeck
 }

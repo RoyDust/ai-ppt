@@ -5,6 +5,14 @@ import AISlideRegenerateDialog from '@/ai/components/AISlideRegenerateDialog.vue
 import { useMainStore, useSlidesStore } from '@/store'
 import { useAIDeckStore } from '@/ai/stores/aiDeck'
 
+const regenerateCurrentSlide = vi.fn(() => Promise.resolve())
+const rerunPreview = vi.fn(() => Promise.resolve())
+const acceptPreviewReplaceCurrent = vi.fn(() => Promise.resolve({
+  versionId: 'version_2',
+  slides: [],
+}))
+const clearPreview = vi.fn()
+
 vi.mock('@/ai/hooks/useAISlideRegeneration', () => ({
   default: () => ({
     previewSlide: ref({
@@ -14,12 +22,10 @@ vi.mock('@/ai/hooks/useAISlideRegeneration', () => ({
       bullets: ['新的结论'],
       regeneratable: true,
     }),
-    regenerateCurrentSlide: vi.fn(() => Promise.resolve()),
-    acceptPreviewReplaceCurrent: vi.fn(() => Promise.resolve({
-      versionId: 'version_2',
-      slides: [],
-    })),
-    clearPreview: vi.fn(),
+    regenerateCurrentSlide,
+    rerunPreview,
+    acceptPreviewReplaceCurrent,
+    clearPreview,
   }),
 }))
 
@@ -27,6 +33,11 @@ afterEach(() => {
   document.body.innerHTML = ''
   vi.clearAllMocks()
 })
+
+const flushUi = async () => {
+  await Promise.resolve()
+  await nextTick()
+}
 
 describe('AISlideRegenerateDialog', () => {
   it('shows current and regenerated slides in a stacked comparison layout', async () => {
@@ -80,7 +91,7 @@ describe('AISlideRegenerateDialog', () => {
       render: () => h(AISlideRegenerateDialog),
     }).use(pinia).mount(host)
 
-    await nextTick()
+    await flushUi()
 
     expect(host.querySelectorAll('.thumbnail-slide')).toHaveLength(2)
     expect(host.querySelector('.compare-grid')).not.toBeNull()
@@ -88,7 +99,93 @@ describe('AISlideRegenerateDialog', () => {
     expect(host.textContent).toContain('新生成页面')
     expect(host.textContent).toContain('标题已重写')
     expect(host.textContent).toContain('新的结论')
-    expect(host.textContent).toContain('保留当前页')
+    expect(host.textContent).toContain('拒绝结果')
+    expect(host.textContent).toContain('重新来一次')
     expect(host.textContent).toContain('替换为新页')
+  })
+
+  it('supports rejecting and retrying a regenerated result', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const mainStore = useMainStore()
+    const slidesStore = useSlidesStore()
+    mainStore.setAISlideRegenerateDialogState(true)
+    mainStore.setAISlideRegenerateContext({ deckId: 'deck_1', slideId: 'slide_2' })
+    slidesStore.setSlides([
+      {
+        id: 'slide_2',
+        type: 'content',
+        background: { type: 'solid', color: '#f5f7fb' },
+        elements: [],
+      },
+    ] as any)
+    slidesStore.updateSlideIndex(0)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    createApp({
+      render: () => h(AISlideRegenerateDialog),
+    }).use(pinia).mount(host)
+
+    await flushUi()
+
+    const retryButton = Array.from(host.querySelectorAll('button')).find(button => button.textContent?.includes('重新来一次')) as HTMLButtonElement
+    expect(retryButton).toBeTruthy()
+    retryButton.click()
+    await flushUi()
+
+    expect(rerunPreview).toHaveBeenCalledTimes(1)
+
+    const rejectButton = Array.from(host.querySelectorAll('button')).find(button => button.textContent?.includes('拒绝结果')) as HTMLButtonElement
+    expect(rejectButton).toBeTruthy()
+    rejectButton.click()
+    await flushUi()
+
+    expect(clearPreview).toHaveBeenCalled()
+    expect(mainStore.showAISlideRegenerateDialog).toBe(false)
+    expect(mainStore.aiSlideRegenerateContext).toBeNull()
+  })
+
+  it('shows a loading state in the regenerated panel while retrying', async () => {
+    let resolveRetry: (() => void) | null = null
+    rerunPreview.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveRetry = () => resolve()
+    }))
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const mainStore = useMainStore()
+    const slidesStore = useSlidesStore()
+    mainStore.setAISlideRegenerateDialogState(true)
+    mainStore.setAISlideRegenerateContext({ deckId: 'deck_1', slideId: 'slide_2' })
+    slidesStore.setSlides([
+      {
+        id: 'slide_2',
+        type: 'content',
+        background: { type: 'solid', color: '#f5f7fb' },
+        elements: [],
+      },
+    ] as any)
+    slidesStore.updateSlideIndex(0)
+
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    createApp({
+      render: () => h(AISlideRegenerateDialog),
+    }).use(pinia).mount(host)
+
+    await flushUi()
+
+    const retryButton = Array.from(host.querySelectorAll('button')).find(button => button.textContent?.includes('重新来一次')) as HTMLButtonElement
+    retryButton.click()
+    await flushUi()
+
+    expect(host.querySelector('.panel-loading')).not.toBeNull()
+    expect(host.textContent).toContain('正在生成新页面...')
+
+    resolveRetry?.()
+    await flushUi()
   })
 })

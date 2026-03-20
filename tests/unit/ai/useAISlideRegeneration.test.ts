@@ -27,6 +27,7 @@ vi.mock('@/ai/services/aiDeck', () => ({
 describe('useAISlideRegeneration', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.clearAllMocks()
   })
 
   it('stores a preview slide before any live mutation', async () => {
@@ -181,5 +182,47 @@ describe('useAISlideRegeneration', () => {
     expect(mainStore.currentVersionId).toBe('version_2')
     expect(slidesStore.currentSlide.id).toBe('regen_1')
     expect(regeneration.previewSlide.value).toBeNull()
+  })
+
+  it('reruns single-slide generation with the last successful payload', async () => {
+    const { renderSlide } = await import('@/ai/services/aiDeck')
+    vi.mocked(renderSlide)
+      .mockResolvedValueOnce({
+        slide: {
+          id: 'regen_1',
+          kind: 'content',
+          title: '初次结果',
+          bullets: ['版本一'],
+          regeneratable: true,
+        },
+      } as any)
+      .mockResolvedValueOnce({
+        slide: {
+          id: 'regen_2',
+          kind: 'content',
+          title: '再次结果',
+          bullets: ['版本二'],
+          regeneratable: true,
+        },
+      } as any)
+
+    const { default: useAISlideRegeneration } = await import('@/ai/hooks/useAISlideRegeneration')
+    const regeneration = useAISlideRegeneration()
+
+    await regeneration.regenerateCurrentSlide({ deckId: 'deck_1', slideId: 'slide_1', instructions: '强化一版' } as any)
+    const retried = await regeneration.rerunPreview()
+
+    expect(renderSlide).toHaveBeenLastCalledWith(expect.objectContaining({
+      deckId: 'deck_1',
+      slideId: 'slide_1',
+      instructions: '强化一版',
+    }))
+    expect(renderSlide).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      deckId: 'deck_1',
+      slideId: 'slide_1',
+      instructions: '强化一版',
+    }))
+    expect(retried?.slide.id).toBe('regen_2')
+    expect(regeneration.previewSlide.value?.id).toBe('regen_2')
   })
 })
