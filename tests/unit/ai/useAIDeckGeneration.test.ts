@@ -166,4 +166,44 @@ describe('useAIDeckGeneration', () => {
     expect(plan?.deck.id).toBe('deck_retry')
     expect(generation.step.value).toBe('outline')
   })
+
+  it('updates explicit planning draft fields on editable slides', async () => {
+    planDeckMock.mockResolvedValueOnce({
+      deck: {
+        id: 'deck_draft',
+        topic: '研究主题',
+        goalPageCount: 10,
+        actualPageCount: 10,
+        language: 'zh-CN',
+        outlineSummary: '摘要',
+        slides: [
+          {
+            id: 'slide_1',
+            kind: 'content',
+            title: '第一页',
+            planningDraft: {
+              pageGoal: '原始页目标',
+              coreMessage: '原始核心信息',
+              supportingPoints: ['原始支撑点'],
+            },
+            regeneratable: true,
+          },
+        ],
+      },
+      slides: [],
+      plannedPageCount: 10,
+    } as any)
+
+    const { default: useAIDeckGeneration } = await import('@/ai/hooks/useAIDeckGeneration')
+    const generation = useAIDeckGeneration()
+
+    await generation.createPlan({ topic: '研究主题', goalPageCount: 10, language: 'zh-CN' })
+    generation.updateSlidePlanningDraftField('slide_1', 'pageGoal', '解释真实触发场景')
+    generation.updateSlidePlanningDraftField('slide_1', 'coreMessage', '场景压力比价格优惠更能驱动组合购买')
+    generation.updateSlidePlanningDraftList('slide_1', 'supportingPoints', '厨房面积有限\n减少反复决策')
+
+    expect(generation.editableDeck.value?.slides[0]?.planningDraft?.pageGoal).toBe('解释真实触发场景')
+    expect(generation.editableDeck.value?.slides[0]?.planningDraft?.coreMessage).toBe('场景压力比价格优惠更能驱动组合购买')
+    expect(generation.editableDeck.value?.slides[0]?.planningDraft?.supportingPoints).toEqual(['厨房面积有限', '减少反复决策'])
+  })
 })

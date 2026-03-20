@@ -42,7 +42,7 @@ describe('OpenAIProvider', () => {
   })
 
   it('sanitizes meta prompt phrases out of visible slide text', async () => {
-    const fetchImpl = async () => ({
+    const fetchImpl = vi.fn(async () => ({
       ok: true,
       json: async () => ({
         choices: [
@@ -79,7 +79,7 @@ describe('OpenAIProvider', () => {
           },
         ],
       }),
-    }) as any
+    })) as any
 
     const provider = new OpenAIProvider({
       apiKey: 'test-key',
@@ -97,6 +97,82 @@ describe('OpenAIProvider', () => {
     const slide = result.deck.slides[0]
     expect(slide.summary).toBe('')
     expect(slide.bullets).toEqual(['真正内容：理解足球全球化的三条主线'])
+  })
+
+  it('normalizes explicit planning draft fields during plan generation', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                id: 'deck_plan_with_draft',
+                topic: '独居家电关联购买研究',
+                goalPageCount: 2,
+                actualPageCount: 2,
+                language: 'zh-CN',
+                outlineSummary: '围绕关联动机、场景组合与策略机会形成策划稿',
+                slides: [
+                  {
+                    id: 'slide_1',
+                    kind: 'content',
+                    title: '组合购买背后的真实触发点',
+                    summary: '从独居做饭、空间压力与效率需求三个方向切入。',
+                    bullets: ['先看触发场景', '再看功能互补', '最后落到电商策略'],
+                    regeneratable: true,
+                    planningDraft: {
+                      pageGoal: '解释独居用户为什么会产生跨品类关联购买',
+                      coreMessage: '关联购买不是凑单，而是场景驱动下的功能组合决策',
+                      audienceTakeaway: '听众应理解场景压力与功能互补才是组合成交的真正原因',
+                      supportingPoints: ['一人食频次提升组合需求', '小空间限制强化多功能组合', '减少决策次数本身就是价值'],
+                      evidenceHints: ['用户原始研究中的独居场景描述', '平台已观测到的电饭煲+空气炸锅组合'],
+                      narrativeFlow: '先场景，后动机，再落策略',
+                      recommendedLayout: 'master_split',
+                      visualDirection: '左侧场景触发，右侧功能互补解释',
+                      designNotes: ['不要写成方法论空话'],
+                      forbiddenContent: ['不要出现系统提示词'],
+                      sourceAnchors: ['项目背景', '项目目标'],
+                    },
+                    metadata: {
+                      layoutTemplate: 'master_split',
+                      pageNumber: 1,
+                    },
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    })) as any
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'http://test.local/v1',
+      model: 'test-model',
+      fetchImpl,
+    })
+
+    const result = await provider.planDeck({
+      topic: '独居家电关联购买研究',
+      goalPageCount: 2,
+      language: 'zh-CN',
+    })
+
+    expect(result.deck.slides[0]?.planningDraft).toEqual({
+      pageGoal: '解释独居用户为什么会产生跨品类关联购买',
+      coreMessage: '关联购买不是凑单，而是场景驱动下的功能组合决策',
+      audienceTakeaway: '听众应理解场景压力与功能互补才是组合成交的真正原因',
+      supportingPoints: ['一人食频次提升组合需求', '小空间限制强化多功能组合', '减少决策次数本身就是价值'],
+      evidenceHints: ['用户原始研究中的独居场景描述', '平台已观测到的电饭煲+空气炸锅组合'],
+      narrativeFlow: '先场景，后动机，再落策略',
+      recommendedLayout: 'master_split',
+      visualDirection: '左侧场景触发，右侧功能互补解释',
+      designNotes: ['不要写成方法论空话'],
+      forbiddenContent: ['不要出现系统提示词'],
+      sourceAnchors: ['项目背景', '项目目标'],
+    })
   })
 
   it('injects user research input and external findings into the planning prompt', async () => {
@@ -151,7 +227,7 @@ describe('OpenAIProvider', () => {
 
     const requestPayload = JSON.parse(fetchImpl.mock.calls[0][1].body)
     const systemPrompt = requestPayload.messages[0].content as string
-    const userPrompt = requestPayload.messages[1].content as string
+    const userPrompt = requestPayload.messages[2].content as string
 
     expect(systemPrompt).toContain('如果用户提供了研究资料，必须优先提炼其中的事实')
     expect(systemPrompt).toContain('禁止生成“背景介绍、现状分析、总结建议”这种万能废话页名')
@@ -162,8 +238,52 @@ describe('OpenAIProvider', () => {
     expect(userPrompt).toContain('独居经济持续升温')
   })
 
+  it('injects local ppt skill guidance into the planning prompt', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                id: 'deck_1',
+                topic: '独居家电关联购买研究',
+                goalPageCount: 10,
+                actualPageCount: 10,
+                language: 'zh-CN',
+                outlineSummary: '围绕动机、场景、机会与策略形成结构化规划',
+                slides: [],
+              }),
+            },
+          },
+        ],
+      }),
+    })) as any
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'http://test.local/v1',
+      model: 'test-model',
+      fetchImpl,
+      searchFetcher: vi.fn(async () => []),
+    })
+
+    await provider.planDeck({
+      topic: '独居家电关联购买研究',
+      goalPageCount: 10,
+      language: 'zh-CN',
+    })
+
+    const requestPayload = JSON.parse(fetchImpl.mock.calls[0][1].body)
+    const skillPrompt = requestPayload.messages[1].content as string
+
+    expect(skillPrompt).toContain('PPT 的灵魂是内容，不是皮囊')
+    expect(skillPrompt).toContain('Planning Draft / 策划稿生成')
+    expect(requestPayload.messages[0].content).toContain('planningDraft')
+  })
+
   it('renders an edited planning deck into a richer final deck through second-pass ai', async () => {
-    const fetchImpl = async () => ({
+    const fetchImpl = vi.fn(async () => ({
       ok: true,
       json: async () => ({
         choices: [
@@ -200,7 +320,7 @@ describe('OpenAIProvider', () => {
           },
         ],
       }),
-    }) as any
+    })) as any
 
     const provider = new OpenAIProvider({
       apiKey: 'test-key',
@@ -224,6 +344,12 @@ describe('OpenAIProvider', () => {
             title: '用户改过的封面标题',
             summary: '用户改过的封面摘要',
             bullets: ['起源', '职业化'],
+            planningDraft: {
+              pageGoal: '用首页建立演示主线',
+              coreMessage: '网球职业化是规则、传播和赛事共同推动的结果',
+              supportingPoints: ['先讲起源', '再讲规则定型'],
+              recommendedLayout: 'master_cover',
+            },
             regeneratable: true,
           },
         ],
@@ -236,6 +362,10 @@ describe('OpenAIProvider', () => {
     expect((result.deck.slides[0] as any).bodySections).toEqual([
       { heading: '历史主线', text: '先看起源，再看规则定型，最后看职业化。' },
     ])
+    const requestPayload = JSON.parse(fetchImpl.mock.calls[0][1].body)
+    expect(requestPayload.messages[1].content).toContain('Content leads, design follows.')
+    expect(requestPayload.messages[0].content).toContain('planningDraft')
+    expect(requestPayload.messages[2].content).toContain('pageGoal')
   })
 
   it('renders a regenerated slide through the llm instead of local fallback', async () => {
@@ -368,6 +498,12 @@ describe('OpenAIProvider', () => {
         id: 'slide_2',
         kind: 'content',
         title: '原始页',
+        planningDraft: {
+          pageGoal: '解释功能互补如何带来组合购买',
+          coreMessage: '场景效率是组合购买的第一驱动',
+          supportingPoints: ['厨房空间有限', '减少单次决策成本'],
+          recommendedLayout: 'master_split',
+        },
         metadata: {
           layoutTemplate: 'master_split',
           pageNumber: 2,
@@ -395,13 +531,17 @@ describe('OpenAIProvider', () => {
 
     const requestPayload = JSON.parse(fetchImpl.mock.calls[0][1].body)
     const systemPrompt = requestPayload.messages[0].content as string
-    const userPayload = JSON.parse(requestPayload.messages[1].content as string)
+    const skillPrompt = requestPayload.messages[1].content as string
+    const userPayload = JSON.parse(requestPayload.messages[2].content as string)
 
     expect(systemPrompt).toContain('当前 PPT 实际页面内容是主要改写依据')
     expect(systemPrompt).toContain('优先保持当前页的页面职责')
     expect(systemPrompt).toContain('优先沿用当前页的 layoutTemplate')
+    expect(systemPrompt).toContain('planningDraft 是当前页改写的首要约束')
+    expect(skillPrompt).toContain('Preserve page purpose before changing expression.')
     expect(userPayload.currentPptSlideSummary.title).toBe('当前 PPT 标题')
     expect(userPayload.currentSlide.metadata.layoutTemplate).toBe('master_split')
+    expect(userPayload.currentSlide.planningDraft.pageGoal).toBe('解释功能互补如何带来组合购买')
   })
 
   it('falls back instead of hanging forever when plan request times out', async () => {

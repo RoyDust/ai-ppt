@@ -19,6 +19,23 @@
         <div class="panel-label">当前页面</div>
         <ThumbnailSlide v-if="currentPPTSlide" class="slide-preview" :slide="currentPPTSlide" :size="620" />
         <div v-else class="empty panel-empty">当前页面暂不可预览</div>
+        <div v-if="currentAISlide" class="intent-card">
+          <div class="intent-title">当前策划意图</div>
+          <div class="intent-row">
+            <span class="intent-key">页目标</span>
+            <span class="intent-value">{{ currentAISlide.planningDraft?.pageGoal || '未提供' }}</span>
+          </div>
+          <div class="intent-row">
+            <span class="intent-key">核心观点</span>
+            <span class="intent-value">{{ currentAISlide.planningDraft?.coreMessage || currentAISlide.summary || '未提供' }}</span>
+          </div>
+          <div v-if="currentAISlide.planningDraft?.supportingPoints?.length" class="intent-list">
+            <div class="intent-key">支撑点</div>
+            <div class="intent-tags">
+              <span v-for="item in currentAISlide.planningDraft?.supportingPoints" :key="item" class="intent-tag">{{ item }}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="compare-panel">
@@ -29,6 +46,23 @@
         </div>
         <ThumbnailSlide v-else-if="previewPPTSlide" class="slide-preview" :slide="previewPPTSlide" :size="620" />
         <div v-else class="empty panel-empty">正在准备新方案...</div>
+        <div v-if="previewSlide" class="intent-card intent-card-accent">
+          <div class="intent-title">新方案策划意图</div>
+          <div class="intent-row">
+            <span class="intent-key">页目标</span>
+            <span class="intent-value">{{ previewSlide.planningDraft?.pageGoal || '未提供' }}</span>
+          </div>
+          <div class="intent-row">
+            <span class="intent-key">核心观点</span>
+            <span class="intent-value">{{ previewSlide.planningDraft?.coreMessage || previewSlide.summary || '未提供' }}</span>
+          </div>
+          <div v-if="previewSlide.planningDraft?.supportingPoints?.length" class="intent-list">
+            <div class="intent-key">支撑点</div>
+            <div class="intent-tags">
+              <span v-for="item in previewSlide.planningDraft?.supportingPoints" :key="item" class="intent-tag">{{ item }}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -256,6 +290,7 @@ watch(
   flex-direction: column;
   align-items: center;
   overflow: hidden;
+  gap: 10px;
 }
 
 .panel-label {
@@ -301,6 +336,71 @@ watch(
   border: 1px dashed #cfd8e3;
   border-radius: 14px;
   background: linear-gradient(180deg, #fbfdff 0%, #f3f7fb 100%);
+}
+
+.intent-card {
+  width: min(100%, 648px);
+  padding: 12px;
+  border: 1px solid #d8e2ec;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbfe 100%);
+}
+
+.intent-card-accent {
+  border-color: #cfe0f2;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef5fc 100%);
+}
+
+.intent-title {
+  margin-bottom: 10px;
+  color: #5b7189;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.intent-row,
+.intent-list {
+  display: grid;
+  gap: 6px;
+}
+
+.intent-row + .intent-row,
+.intent-row + .intent-list,
+.intent-list + .intent-row,
+.intent-list + .intent-list {
+  margin-top: 10px;
+}
+
+.intent-key {
+  color: #41556b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.intent-value {
+  color: #1d3148;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.intent-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.intent-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eaf1f8;
+  color: #28415a;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .loading-dot {

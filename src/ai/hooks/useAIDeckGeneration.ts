@@ -8,6 +8,7 @@ import useAIDeckLoader from './useAIDeckLoader'
 import { acceptDeckRender, getAITask, planDeck, renderDeck } from '../services/aiDeck'
 import { normalizeDeckPlanInput, type DeckPlanInput } from '../types/deck'
 import type { DeckPlanResponse } from '../types/deck'
+import type { AISlidePlanningDraft } from '../types/slide'
 import { pollAITaskUntilSettled } from '../utils/taskPolling'
 
 export type AIDeckGenerationStep = 'setup' | 'outline' | 'generating'
@@ -160,6 +161,24 @@ export default () => {
     aiDeckStore.updateSlideBullets(slideId, bullets)
   }
 
+  const updateSlidePlanningDraftField = (
+    slideId: string,
+    field: keyof Pick<AISlidePlanningDraft, 'pageGoal' | 'coreMessage' | 'audienceTakeaway' | 'narrativeFlow' | 'recommendedLayout' | 'visualDirection'>,
+    value: string,
+  ) => aiDeckStore.updateSlidePlanningDraftField(slideId, field, value)
+
+  const updateSlidePlanningDraftList = (
+    slideId: string,
+    field: keyof Pick<AISlidePlanningDraft, 'supportingPoints' | 'evidenceHints' | 'designNotes' | 'forbiddenContent' | 'sourceAnchors'>,
+    value: string,
+  ) => {
+    const items = value
+      .split('\n')
+      .map(item => item.trim())
+      .filter(Boolean)
+    aiDeckStore.updateSlidePlanningDraftList(slideId, field, items)
+  }
+
   return {
     step,
     topic,
@@ -181,5 +200,7 @@ export default () => {
     updateSlideTitle,
     updateSlideSummary,
     updateSlideBullets,
+    updateSlidePlanningDraftField,
+    updateSlidePlanningDraftList,
   }
 }

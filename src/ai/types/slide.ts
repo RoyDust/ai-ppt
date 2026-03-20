@@ -5,6 +5,20 @@ export interface AISlideBodySection {
   text: string
 }
 
+export interface AISlidePlanningDraft {
+  pageGoal?: string
+  coreMessage?: string
+  audienceTakeaway?: string
+  supportingPoints?: string[]
+  evidenceHints?: string[]
+  narrativeFlow?: string
+  recommendedLayout?: string
+  visualDirection?: string
+  designNotes?: string[]
+  forbiddenContent?: string[]
+  sourceAnchors?: string[]
+}
+
 export interface AISlide {
   id: string
   kind: AISlideKind
@@ -12,6 +26,7 @@ export interface AISlide {
   subtitle?: string
   summary?: string
   bullets?: string[]
+  planningDraft?: AISlidePlanningDraft
   bodySections?: AISlideBodySection[]
   keyHighlights?: string[]
   visualTone?: string

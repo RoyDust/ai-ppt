@@ -78,6 +78,7 @@ export default () => {
         id: slide.id,
         kind: slide.kind,
         title: slide.title,
+        planningDraft: slide.planningDraft,
       })),
     }
     lastInput.value = payload

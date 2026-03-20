@@ -5,7 +5,7 @@
         <div>
           <div class="section-kicker">Outline Control</div>
           <div class="summary">已规划 {{ plannedPageCount }} 页</div>
-          <div class="tip">此处编辑的是规划稿文案，后续 render 会严格基于这些内容生成 PPT。</div>
+          <div class="tip">此处编辑的是策划稿与页面草稿，后续 render 会严格基于这些内容生成 PPT。</div>
         </div>
         <div class="overview-chip">先校稿，再生成</div>
       </div>
@@ -68,6 +68,157 @@
             />
           </div>
         </div>
+
+        <div class="planning-panel">
+          <div class="planning-head">
+            <div>
+              <div class="field-label">策划稿</div>
+              <div class="planning-tip">先锁定这页的目标、核心判断、支撑信息和表达方向，再进入最终生成。</div>
+            </div>
+            <div class="planning-chip">Planning Draft</div>
+          </div>
+
+          <div class="field two-col">
+            <div class="field-panel">
+              <div class="field-label">页目标</div>
+              <TextArea
+                :value="slide.planningDraft?.pageGoal || ''"
+                :rows="2"
+                :padding="10"
+                resizable
+                placeholder="这页要解决什么认知问题"
+                @update:value="$emit('update:slidePlanningDraftField', slide.id, 'pageGoal', $event)"
+              />
+            </div>
+
+            <div class="field-panel">
+              <div class="field-label">核心观点</div>
+              <TextArea
+                :value="slide.planningDraft?.coreMessage || ''"
+                :rows="2"
+                :padding="10"
+                resizable
+                placeholder="这一页最核心的一句判断"
+                @update:value="$emit('update:slidePlanningDraftField', slide.id, 'coreMessage', $event)"
+              />
+            </div>
+          </div>
+
+          <div class="field two-col">
+            <div class="field-panel">
+              <div class="field-label">观众带走什么</div>
+              <TextArea
+                :value="slide.planningDraft?.audienceTakeaway || ''"
+                :rows="2"
+                :padding="10"
+                resizable
+                placeholder="观众看完这一页后应该记住什么"
+                @update:value="$emit('update:slidePlanningDraftField', slide.id, 'audienceTakeaway', $event)"
+              />
+            </div>
+
+            <div class="field-panel">
+              <div class="field-label">叙事顺序</div>
+              <TextArea
+                :value="slide.planningDraft?.narrativeFlow || ''"
+                :rows="2"
+                :padding="10"
+                resizable
+                placeholder="例如：先场景，后原因，再落动作"
+                @update:value="$emit('update:slidePlanningDraftField', slide.id, 'narrativeFlow', $event)"
+              />
+            </div>
+          </div>
+
+          <div class="field two-col">
+            <div class="field-panel">
+              <div class="field-label">支撑信息</div>
+              <TextArea
+                :value="toBulletText(slide.planningDraft?.supportingPoints)"
+                :rows="4"
+                :padding="10"
+                resizable
+                placeholder="每行一个支撑点"
+                @update:value="$emit('update:slidePlanningDraftList', slide.id, 'supportingPoints', $event)"
+              />
+            </div>
+
+            <div class="field-panel">
+              <div class="field-label">证据线索</div>
+              <TextArea
+                :value="toBulletText(slide.planningDraft?.evidenceHints)"
+                :rows="4"
+                :padding="10"
+                resizable
+                placeholder="每行一条可引用的证据、数据或访谈线索"
+                @update:value="$emit('update:slidePlanningDraftList', slide.id, 'evidenceHints', $event)"
+              />
+            </div>
+          </div>
+
+          <div class="field two-col">
+            <div class="field-panel">
+              <div class="field-label">建议版式</div>
+              <Input
+                :value="slide.planningDraft?.recommendedLayout || ''"
+                placeholder="例如 master_split"
+                @update:value="$emit('update:slidePlanningDraftField', slide.id, 'recommendedLayout', $event)"
+              />
+            </div>
+
+            <div class="field-panel">
+              <div class="field-label">视觉方向</div>
+              <TextArea
+                :value="slide.planningDraft?.visualDirection || ''"
+                :rows="2"
+                :padding="10"
+                resizable
+                placeholder="例如 左侧场景触发，右侧功能互补解释"
+                @update:value="$emit('update:slidePlanningDraftField', slide.id, 'visualDirection', $event)"
+              />
+            </div>
+          </div>
+
+          <div class="field two-col">
+            <div class="field-panel">
+              <div class="field-label">设计备注</div>
+              <TextArea
+                :value="toBulletText(slide.planningDraft?.designNotes)"
+                :rows="3"
+                :padding="10"
+                resizable
+                placeholder="每行一条设计提醒"
+                @update:value="$emit('update:slidePlanningDraftList', slide.id, 'designNotes', $event)"
+              />
+            </div>
+
+            <div class="field-panel">
+              <div class="field-label">禁止出现</div>
+              <TextArea
+                :value="toBulletText(slide.planningDraft?.forbiddenContent)"
+                :rows="3"
+                :padding="10"
+                resizable
+                placeholder="每行一条不该出现的内容或表达"
+                @update:value="$emit('update:slidePlanningDraftList', slide.id, 'forbiddenContent', $event)"
+              />
+            </div>
+          </div>
+
+          <div class="field">
+            <div class="field-panel">
+              <div class="field-label">来源锚点</div>
+              <TextArea
+                :value="toBulletText(slide.planningDraft?.sourceAnchors)"
+                :rows="3"
+                :padding="10"
+                resizable
+                placeholder="每行一个来源锚点，例如 项目背景 / 访谈洞察 / 外部补充"
+                @update:value="$emit('update:slidePlanningDraftList', slide.id, 'sourceAnchors', $event)"
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -88,6 +239,7 @@ import Button from '@/components/Button.vue'
 import Input from '@/components/Input.vue'
 import TextArea from '@/components/TextArea.vue'
 import type { AIDeck } from '../types/deck'
+import type { AISlidePlanningDraft } from '../types/slide'
 
 defineProps<{
   deck: AIDeck | null
@@ -102,6 +254,16 @@ defineEmits<{
   'update:slideTitle': [slideId: string, value: string]
   'update:slideSummary': [slideId: string, value: string]
   'update:slideBullets': [slideId: string, value: string]
+  'update:slidePlanningDraftField': [
+    slideId: string,
+    field: keyof Pick<AISlidePlanningDraft, 'pageGoal' | 'coreMessage' | 'audienceTakeaway' | 'narrativeFlow' | 'recommendedLayout' | 'visualDirection'>,
+    value: string,
+  ]
+  'update:slidePlanningDraftList': [
+    slideId: string,
+    field: keyof Pick<AISlidePlanningDraft, 'supportingPoints' | 'evidenceHints' | 'designNotes' | 'forbiddenContent' | 'sourceAnchors'>,
+    value: string,
+  ]
 }>()
 
 const toBulletText = (bullets?: string[]) => (bullets ?? []).join('\n')
@@ -188,6 +350,38 @@ const toBulletText = (bullets?: string[]) => (bullets ?? []).join('\n')
   color: #41464b;
 }
 
+.planning-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #eef0f3;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfbfc 100%);
+}
+
+.planning-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.planning-tip {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+
+.planning-chip {
+  padding: 6px 10px;
+  border: 1px solid #f1c3b7;
+  border-radius: 999px;
+  background: #fff6f3;
+  font-size: 12px;
+  color: #d14424;
+}
+
 .slides-list {
   display: grid;
   gap: 12px;
@@ -271,7 +465,8 @@ const toBulletText = (bullets?: string[]) => (bullets ?? []).join('\n')
   }
 
   .overview-head,
-  .review-actions {
+  .review-actions,
+  .planning-head {
     align-items: stretch;
     flex-direction: column;
   }

@@ -1,5 +1,5 @@
 import type { AIDeck } from '../../../ai-schema/src/ai-deck'
-import type { AISlide } from '../../../ai-schema/src/ai-slide'
+import type { AISlide, AISlidePlanningDraft } from '../../../ai-schema/src/ai-slide'
 import type { SlideRegenerationContext } from '../../../ai-schema/src/regeneration-context'
 import type {
   DeckRenderRequest,
@@ -10,6 +10,7 @@ import type {
   ResearchProjectInput,
   SlideRegenerationResult,
 } from './llm-provider.interface'
+import { getPPTSkillContext } from './ppt-skill-context'
 
 export interface OpenAIProviderOptions {
   apiKey?: string
@@ -143,6 +144,14 @@ const sanitizeSectionList = (items: unknown) => {
       return { heading, text }
     })
     .filter(Boolean) as Array<{ heading: string, text: string }>
+}
+
+const sanitizePlanningDraftList = (items: unknown) => {
+  if (!Array.isArray(items)) return []
+
+  return items
+    .map(item => sanitizeVisibleText(typeof item === 'string' ? item : ''))
+    .filter(Boolean)
 }
 
 const normalizeResearchItems = (items?: string[]) =>
@@ -372,6 +381,21 @@ const buildFallbackSlides = (topic: string, goalPageCount: number) => {
       designFeatures: slide.designFeatures ?? [],
       layoutInstructions: slide.layoutInstructions ?? '',
       validationResult: slide.validationResult ?? '',
+      planningDraft: {
+        pageGoal: slide.summary ?? `${topic} 第 ${index + 1} 页用于建立清晰页面目标。`,
+        coreMessage: slide.title ?? `${topic} · 第 ${index + 1} 页`,
+        audienceTakeaway: slide.validationResult ?? `观众需要带走关于 ${topic} 的一个明确判断。`,
+        supportingPoints: slide.bullets ?? [],
+        evidenceHints: (slide.bullets ?? []).slice(0, 2),
+        narrativeFlow: slide.summary ?? '先建立认知，再补充证据，最后收束结论。',
+        recommendedLayout: typeof (slide.metadata as Record<string, unknown> | undefined)?.layoutTemplate === 'string'
+          ? String((slide.metadata as Record<string, unknown>).layoutTemplate)
+          : DEFAULT_LAYOUT_SEQUENCE[Math.min(index, DEFAULT_LAYOUT_SEQUENCE.length - 1)],
+        visualDirection: slide.layoutInstructions ?? '优先用模板化层级承载页面重点。',
+        designNotes: slide.designRequirements ?? [],
+        forbiddenContent: [],
+        sourceAnchors: [],
+      },
       metadata: slide.metadata ?? {
         layoutTemplate: DEFAULT_LAYOUT_SEQUENCE[Math.min(index, DEFAULT_LAYOUT_SEQUENCE.length - 1)],
         pageNumber: index + 1,
@@ -475,7 +499,7 @@ export class OpenAIProvider implements LLMProvider {
           Accept: 'application/json',
           'User-Agent': 'pptist-ai-server/1.0',
         },
-      }) as Promise<Response>
+      })
 
       const timedResponse = await Promise.race([
         response,
@@ -542,7 +566,8 @@ export class OpenAIProvider implements LLMProvider {
               '你是顶级演示文稿策划专家。',
               '目标不是简单列标题，而是生成可直接用于 PPT 设计的规划结果。',
               '输出 JSON，字段必须包含：id, topic, goalPageCount, actualPageCount, language, outlineSummary, templateId, designSystem, themeName, designRequirements, designCharacteristics, contentBlueprint, slides。',
-              '每个 slide 必须包含：id, kind, title, summary, bullets, regeneratable, designRequirements, designFeatures, layoutInstructions, validationResult, metadata。',
+              '每个 slide 必须包含：id, kind, title, summary, bullets, regeneratable, designRequirements, designFeatures, layoutInstructions, validationResult, planningDraft, metadata。',
+              'planningDraft 是每页显式策划稿，必须包含：pageGoal, coreMessage, audienceTakeaway, supportingPoints, evidenceHints, narrativeFlow, recommendedLayout, visualDirection, designNotes, forbiddenContent, sourceAnchors。',
               'metadata 内必须包含 layoutTemplate 和 pageNumber。',
               'templateId 固定输出 MASTER_TEMPLATE_AI。',
               'layoutTemplate 只能从以下集合选择：master_cover, master_section, master_toc, master_timeline, master_split, master_grid, master_compare, master_table, master_summary, master_closing。',
@@ -565,6 +590,10 @@ export class OpenAIProvider implements LLMProvider {
               '禁止生成“背景介绍、现状分析、总结建议”这种万能废话页名，标题必须贴合主题语义。',
               '如果输入是研究项目，必须把项目背景、目标、样本设计、研究框架转译成更适合汇报的叙事结构，而不是原文搬运。',
             ].join('\n'),
+          },
+          {
+            role: 'system',
+            content: getPPTSkillContext('plan'),
           },
           {
             role: 'user',
@@ -617,7 +646,8 @@ export class OpenAIProvider implements LLMProvider {
             '不要只复述用户原文，也不要只把 bullets 原样搬运到页面。',
             '你必须对每页进行内容重写、信息重组和视觉表达设计，让它更像真实 PPT。',
             '输出 JSON，字段必须包含：id, topic, goalPageCount, actualPageCount, language, outlineSummary, templateId, designSystem, themeName, designRequirements, designCharacteristics, contentBlueprint, slides。',
-            '每个 slide 必须包含：id, kind, title, subtitle, summary, bullets, bodySections, keyHighlights, visualTone, imageIntent, regeneratable, designRequirements, designFeatures, layoutInstructions, validationResult, metadata。',
+            '每个 slide 必须包含：id, kind, title, subtitle, summary, bullets, bodySections, keyHighlights, visualTone, imageIntent, regeneratable, designRequirements, designFeatures, layoutInstructions, validationResult, planningDraft, metadata。',
+            '优先把 planningDraft 当作每页内容意图的第一信号；如果 planningDraft 缺失，再回退读取 title、summary、bullets 与其他旧字段。',
             'bodySections 是数组，每项必须包含 heading 和 text。',
             'keyHighlights 是数组，必须提供适合卡片、强调语或标签区展示的短句。',
             'subtitle、summary、bullets、bodySections、keyHighlights 都是可见内容，绝对不要输出“副标题：”“关键词：”“设计说明：”“布局说明：”“提示：”这类标签化元文本。',
@@ -634,6 +664,10 @@ export class OpenAIProvider implements LLMProvider {
             '如果选择 master_table，优先输出 bodySections，确保每一行都对应可独立展示的信息。',
             '如果选择 master_toc 或 master_grid，bullets 不能空洞，每条都要是可直接上版的具体信息。',
           ].join('\n'),
+        },
+        {
+          role: 'system',
+          content: getPPTSkillContext('render'),
         },
         {
           role: 'user',
@@ -676,12 +710,13 @@ export class OpenAIProvider implements LLMProvider {
               '你收到的是整份演示的全局配置、当前页、邻页和整份大纲。',
               '你的任务是只输出 1 页新的 slide JSON，用于替换当前页，同时保持与整份演示的主题、语气和模板风格一致。',
               '输出 JSON，顶层字段必须是 slide。',
-              'slide 必须包含：id, kind, title, subtitle, summary, bullets, bodySections, keyHighlights, visualTone, imageIntent, regeneratable, designRequirements, designFeatures, layoutInstructions, validationResult, metadata。',
+              'slide 必须包含：id, kind, title, subtitle, summary, bullets, bodySections, keyHighlights, visualTone, imageIntent, regeneratable, designRequirements, designFeatures, layoutInstructions, validationResult, planningDraft, metadata。',
               'bodySections 是数组，每项必须包含 heading 和 text。',
               'keyHighlights 是数组，必须提供适合卡片、强调语或标签区展示的短句。',
               'title、subtitle、summary、bullets、bodySections、keyHighlights 都是可见内容，绝对不要输出“副标题：”“关键词：”“设计说明：”“布局说明：”“提示：”这类标签化元文本。',
               '不要把占位图说明、装饰说明、版式指令直接写进可见文本。',
               '当前 PPT 实际页面内容是主要改写依据，必须优先继承当前页已经成立的信息结构、重点顺序和表达主题。',
+              'planningDraft 是当前页改写的首要约束；如果 currentSlide.planningDraft 存在，优先把它当作本页页面职责、核心信息和布局意图的来源。',
               '必须基于当前页和邻页上下文进行改写，避免与前后页重复，同时保持整份 deck 的逻辑连续性。',
               '优先保持当前页的页面职责，不要把本页改写成与前后页无关的新章节。',
               '优先沿用当前页的 layoutTemplate；只有在当前结构明显不适合承载新内容时，才允许调整。',
@@ -692,6 +727,10 @@ export class OpenAIProvider implements LLMProvider {
               '中文字体固定 Microsoft YaHei，英文字体固定 Arial。',
               '优先产出信息密度适中、可视化强、适合直接排版的内容块，而不是长段讲义。',
             ].join('\n'),
+          },
+          {
+            role: 'system',
+            content: getPPTSkillContext('regenerate'),
           },
           {
             role: 'user',
@@ -768,6 +807,7 @@ export class OpenAIProvider implements LLMProvider {
       ? sanitizeVisibleList(slide.keyHighlights.filter(item => typeof item === 'string') as string[])
       : []
     const bodySections = sanitizeSectionList(slide.bodySections)
+    const metadata = this.normalizeMetadata(slide.metadata, index, slide.kind, title, bullets)
 
     return {
       id: typeof slide.id === 'string' ? slide.id : `ai_slide_${index + 1}`,
@@ -785,7 +825,46 @@ export class OpenAIProvider implements LLMProvider {
       designFeatures: Array.isArray(slide.designFeatures) ? slide.designFeatures.filter(item => typeof item === 'string') as string[] : [],
       layoutInstructions: typeof slide.layoutInstructions === 'string' ? slide.layoutInstructions : '',
       validationResult: typeof slide.validationResult === 'string' ? slide.validationResult : '',
-      metadata: this.normalizeMetadata(slide.metadata, index, slide.kind, title, bullets),
+      planningDraft: this.normalizePlanningDraft(slide, title, summary, bullets, bodySections, String(metadata.layoutTemplate)),
+      metadata,
+    }
+  }
+
+  private normalizePlanningDraft(
+    slide: Record<string, unknown>,
+    title: string,
+    summary: string,
+    bullets: string[],
+    bodySections: Array<{ heading: string, text: string }>,
+    layoutTemplate: string,
+  ): AISlidePlanningDraft {
+    const draft = slide.planningDraft && typeof slide.planningDraft === 'object'
+      ? slide.planningDraft as Record<string, unknown>
+      : {}
+
+    const evidenceFallback = bodySections
+      .flatMap(section => [section.heading, section.text])
+      .map(item => sanitizeVisibleText(item))
+      .filter(Boolean)
+
+    const supportingPoints = sanitizePlanningDraftList(draft.supportingPoints)
+    const evidenceHints = sanitizePlanningDraftList(draft.evidenceHints)
+    const designNotes = sanitizePlanningDraftList(draft.designNotes)
+    const forbiddenContent = sanitizePlanningDraftList(draft.forbiddenContent)
+    const sourceAnchors = sanitizePlanningDraftList(draft.sourceAnchors)
+
+    return {
+      pageGoal: sanitizeVisibleText(typeof draft.pageGoal === 'string' ? draft.pageGoal : '') || summary || title,
+      coreMessage: sanitizeVisibleText(typeof draft.coreMessage === 'string' ? draft.coreMessage : '') || title,
+      audienceTakeaway: sanitizeVisibleText(typeof draft.audienceTakeaway === 'string' ? draft.audienceTakeaway : '') || summary || title,
+      supportingPoints: supportingPoints.length ? supportingPoints : bullets,
+      evidenceHints: evidenceHints.length ? evidenceHints : evidenceFallback.slice(0, 3),
+      narrativeFlow: sanitizeVisibleText(typeof draft.narrativeFlow === 'string' ? draft.narrativeFlow : '') || summary || `先用 ${title} 建立页面主线，再补充细节。`,
+      recommendedLayout: sanitizeVisibleText(typeof draft.recommendedLayout === 'string' ? draft.recommendedLayout : '') || layoutTemplate,
+      visualDirection: sanitizeVisibleText(typeof draft.visualDirection === 'string' ? draft.visualDirection : '') || `使用 ${layoutTemplate} 承载页面信息层级。`,
+      designNotes: designNotes.length ? designNotes : sanitizePlanningDraftList(slide.designRequirements),
+      forbiddenContent,
+      sourceAnchors,
     }
   }
 

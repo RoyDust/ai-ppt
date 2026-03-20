@@ -20,6 +20,11 @@ vi.mock('@/ai/hooks/useAISlideRegeneration', () => ({
       kind: 'content',
       title: '新方案页',
       bullets: ['新的结论'],
+      planningDraft: {
+        pageGoal: '给出新的单页结论表达',
+        coreMessage: '新方案会把结论讲得更聚焦',
+        supportingPoints: ['强化判断', '补齐依据'],
+      },
       regeneratable: true,
     }),
     regenerateCurrentSlide,
@@ -79,7 +84,18 @@ describe('AISlideRegenerateDialog', () => {
       outlineSummary: '职业规划汇报',
       slides: [
         { id: 'slide_1', kind: 'cover', title: '封面', regeneratable: true },
-        { id: 'slide_2', kind: 'content', title: '当前页面', bullets: ['当前要点'], regeneratable: true },
+        {
+          id: 'slide_2',
+          kind: 'content',
+          title: '当前页面',
+          bullets: ['当前要点'],
+          planningDraft: {
+            pageGoal: '解释当前页的核心判断',
+            coreMessage: '当前页主要用于建立基本结论',
+            supportingPoints: ['当前要点'],
+          },
+          regeneratable: true,
+        },
         { id: 'slide_3', kind: 'summary', title: '总结', regeneratable: true },
       ],
     } as any)
@@ -99,6 +115,10 @@ describe('AISlideRegenerateDialog', () => {
     expect(host.textContent).toContain('新生成页面')
     expect(host.textContent).toContain('标题已重写')
     expect(host.textContent).toContain('新的结论')
+    expect(host.textContent).toContain('页目标')
+    expect(host.textContent).toContain('解释当前页的核心判断')
+    expect(host.textContent).toContain('给出新的单页结论表达')
+    expect(host.textContent).toContain('核心观点')
     expect(host.textContent).toContain('拒绝结果')
     expect(host.textContent).toContain('重新来一次')
     expect(host.textContent).toContain('替换为新页')

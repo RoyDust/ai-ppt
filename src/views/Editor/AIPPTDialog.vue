@@ -42,6 +42,8 @@
             @update:slide-title="updateSlideTitle"
             @update:slide-summary="updateSlideSummary"
             @update:slide-bullets="updateSlideBullets"
+            @update:slide-planning-draft-field="updateSlidePlanningDraftField"
+            @update:slide-planning-draft-list="updateSlidePlanningDraftList"
           />
 
           <AIDeckGenerating v-else :last-polled-at="lastPolledAt" />
@@ -137,6 +139,8 @@ const {
   updateSlideTitle,
   updateSlideSummary,
   updateSlideBullets,
+  updateSlidePlanningDraftField,
+  updateSlidePlanningDraftList,
 } = useAIDeckGeneration()
 
 const meta = computed(() => getAIPPTDialogMeta({

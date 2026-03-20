@@ -103,7 +103,19 @@ describe('useAISlideRegeneration', () => {
       designSystem: 'master-template-ai',
       slides: [
         { id: 'slide_1', kind: 'cover', title: '封面', regeneratable: true },
-        { id: 'slide_2', kind: 'content', title: '核心机会', bullets: ['原始内容'], regeneratable: true },
+        {
+          id: 'slide_2',
+          kind: 'content',
+          title: '核心机会',
+          bullets: ['原始内容'],
+          planningDraft: {
+            pageGoal: '解释职业选择的关键驱动因素',
+            coreMessage: '岗位匹配度比短期热度更重要',
+            supportingPoints: ['兴趣与岗位匹配', '长期成长空间'],
+            recommendedLayout: 'master_split',
+          },
+          regeneratable: true,
+        },
         { id: 'slide_3', kind: 'summary', title: '总结', regeneratable: true },
       ],
     } as any)
@@ -139,13 +151,35 @@ describe('useAISlideRegeneration', () => {
           { textType: 'item', text: '当前 PPT 要点', left: 108, top: 214, width: 240, height: 66 },
         ],
       },
-      currentSlide: { id: 'slide_2', kind: 'content', title: '核心机会', bullets: ['原始内容'], regeneratable: true },
+      currentSlide: {
+        id: 'slide_2',
+        kind: 'content',
+        title: '核心机会',
+        bullets: ['原始内容'],
+        planningDraft: {
+          pageGoal: '解释职业选择的关键驱动因素',
+          coreMessage: '岗位匹配度比短期热度更重要',
+          supportingPoints: ['兴趣与岗位匹配', '长期成长空间'],
+          recommendedLayout: 'master_split',
+        },
+        regeneratable: true,
+      },
       previousSlide: { id: 'slide_1', kind: 'cover', title: '封面', regeneratable: true },
       nextSlide: { id: 'slide_3', kind: 'summary', title: '总结', regeneratable: true },
       deckOutline: [
-        { id: 'slide_1', kind: 'cover', title: '封面' },
-        { id: 'slide_2', kind: 'content', title: '核心机会' },
-        { id: 'slide_3', kind: 'summary', title: '总结' },
+        { id: 'slide_1', kind: 'cover', title: '封面', planningDraft: undefined },
+        {
+          id: 'slide_2',
+          kind: 'content',
+          title: '核心机会',
+          planningDraft: {
+            pageGoal: '解释职业选择的关键驱动因素',
+            coreMessage: '岗位匹配度比短期热度更重要',
+            supportingPoints: ['兴趣与岗位匹配', '长期成长空间'],
+            recommendedLayout: 'master_split',
+          },
+        },
+        { id: 'slide_3', kind: 'summary', title: '总结', planningDraft: undefined },
       ],
     })
   })
