@@ -7,7 +7,7 @@ import { useAITasksStore } from '../stores/aiTasks'
 import useAIDeckLoader from './useAIDeckLoader'
 import { acceptDeckRender, getAITask, planDeck, renderDeck } from '../services/aiDeck'
 import { normalizeDeckPlanInput, type DeckPlanInput } from '../types/deck'
-import type { DeckPlanResponse } from '../types/deck'
+import type { AIPageCountRange, DeckPlanResponse } from '../types/deck'
 import type { AISlidePlanningDraft } from '../types/slide'
 import { pollAITaskUntilSettled } from '../utils/taskPolling'
 
@@ -21,6 +21,7 @@ export default () => {
   const step = ref<AIDeckGenerationStep>('setup')
   const topic = ref('')
   const goalPageCount = ref(10)
+  const pageCountRange = ref<AIPageCountRange | undefined>(undefined)
   const language = ref('zh-CN')
 
   const { editableDeck, plannedPageCount } = storeToRefs(aiDeckStore)
@@ -56,6 +57,7 @@ export default () => {
     aiTasksStore.setRenderError('')
     topic.value = payload.topic
     goalPageCount.value = payload.goalPageCount
+    pageCountRange.value = payload.pageCountRange
     language.value = payload.language
 
     try {
@@ -183,6 +185,7 @@ export default () => {
     step,
     topic,
     goalPageCount,
+    pageCountRange,
     language,
     editableDeck,
     lastPolledAt,

@@ -26,6 +26,7 @@
             v-if="step === 'setup'"
             :topic="topic"
             :goalPageCount="goalPageCount"
+            :page-count-range="pageCountRange"
             :language="language"
             :loading="isPlanning"
             @submit="createPlan"
@@ -125,6 +126,7 @@ const {
   step,
   topic,
   goalPageCount,
+  pageCountRange,
   language,
   editableDeck,
   lastPolledAt,
@@ -147,6 +149,7 @@ const meta = computed(() => getAIPPTDialogMeta({
   step: step.value,
   topic: topic.value,
   goalPageCount: goalPageCount.value,
+  pageCountRange: pageCountRange.value,
   language: language.value,
   isPlanning: isPlanning.value,
   isRendering: isRendering.value,

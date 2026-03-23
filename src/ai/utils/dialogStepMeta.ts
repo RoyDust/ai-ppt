@@ -1,8 +1,11 @@
+import type { AIPageCountRange } from '../types/deck'
+
 type AIDeckStep = 'setup' | 'outline' | 'generating'
 
 interface DialogMetaOptions {
   step: AIDeckStep
   goalPageCount: number
+  pageCountRange?: AIPageCountRange
   language: string
   topic?: string
   isPlanning: boolean
@@ -34,7 +37,7 @@ export interface AIPPTDialogMeta {
 }
 
 const WORKFLOW_STEPS: WorkflowStep[] = [
-  { key: 'setup', label: '01 规划', description: '输入主题，定义页数和语言。' },
+  { key: 'setup', label: '01 规划', description: '输入主题，定义页数范围和语言。' },
   { key: 'outline', label: '02 校稿', description: '确认大纲内容，再决定是否开始生成。' },
   { key: 'generating', label: '03 渲染', description: '按确认后的规划稿执行二次 AI 生成。' },
 ]
@@ -47,6 +50,7 @@ const LANGUAGE_LABELS: Record<string, string> = {
 export const getAIPPTDialogMeta = ({
   step,
   goalPageCount,
+  pageCountRange,
   language,
   topic,
   isPlanning,
@@ -56,7 +60,7 @@ export const getAIPPTDialogMeta = ({
   const normalizedTopic = topic?.trim() || '待输入'
   const summaryItems: SummaryItem[] = [
     { label: '主题', value: normalizedTopic },
-    { label: '目标页数', value: `${goalPageCount} 页` },
+    { label: pageCountRange ? '页数范围' : '目标页数', value: pageCountRange?.label || `${goalPageCount} 页` },
     { label: '输出语言', value: LANGUAGE_LABELS[language] || language },
   ]
 
@@ -74,7 +78,7 @@ export const getAIPPTDialogMeta = ({
       summaryItems,
       guidance: [
         '先输入主题，让 AI 给出第一版规划。',
-        '页数和语言只影响规划边界，不会直接跳过确认环节。',
+        '页数范围和语言只影响规划边界，不会直接跳过确认环节。',
         isPlanning ? '规划进行中，请不要重复提交。' : '确认参数后再发起规划，后续仍可编辑大纲。',
       ],
       statusNote: isPlanning ? 'AI 正在拆解主题并规划目录。' : '等待开始规划',

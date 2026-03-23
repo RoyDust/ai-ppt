@@ -2,7 +2,8 @@ import { createApp, h, nextTick } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import AIDeckSetupForm from '@/ai/components/AIDeckSetupForm.vue'
 import {
-  DEFAULT_AI_DECK_PAGE_COUNT,
+  AI_DECK_PAGE_COUNT_RANGES,
+  DEFAULT_AI_DECK_PAGE_COUNT_RANGE,
   MAX_AI_DECK_PAGE_COUNT,
   MIN_AI_DECK_PAGE_COUNT,
   normalizeDeckPlanInput,
@@ -18,6 +19,7 @@ describe('AIDeckSetupForm input governance helpers', () => {
       inputMode: 'simple',
       topic: '   ',
       goalPageCount: 10,
+      pageCountRange: AI_DECK_PAGE_COUNT_RANGES[1],
       language: 'zh-CN',
     })
 
@@ -30,6 +32,7 @@ describe('AIDeckSetupForm input governance helpers', () => {
       inputMode: 'research',
       topic: '',
       goalPageCount: 11,
+      pageCountRange: AI_DECK_PAGE_COUNT_RANGES[1],
       language: 'zh-CN',
       researchBrief: '{"projectBackground":["A"],',
     })
@@ -47,6 +50,13 @@ describe('AIDeckSetupForm input governance helpers', () => {
       inputMode: 'research',
       topic: '  2026 消费者研究  ',
       goalPageCount: MAX_AI_DECK_PAGE_COUNT + 10,
+      pageCountRange: {
+        key: 'extended',
+        label: '16-20 页',
+        min: 16,
+        max: 20,
+        suggested: 18,
+      },
       language: 'zh-CN',
       researchInput: {
         projectBackground: ['', '  背景一  ', noisyLine],
@@ -57,7 +67,14 @@ describe('AIDeckSetupForm input governance helpers', () => {
     })
 
     expect(result.ok).toBe(true)
-    expect(result.payload.goalPageCount).toBe(MAX_AI_DECK_PAGE_COUNT)
+    expect(result.payload.goalPageCount).toBe(18)
+    expect(result.payload.pageCountRange).toEqual({
+      key: 'extended',
+      label: '16-20 页',
+      min: 16,
+      max: 20,
+      suggested: 18,
+    })
     expect(result.payload.topic).toBe('2026 消费者研究')
     expect(result.payload.researchInput).toEqual({
       projectBackground: ['背景一', 'A'.repeat(280)],
@@ -71,15 +88,16 @@ describe('AIDeckSetupForm input governance helpers', () => {
       inputMode: 'simple',
       topic: '研究汇报',
       goalPageCount: MIN_AI_DECK_PAGE_COUNT - 5,
+      pageCountRange: AI_DECK_PAGE_COUNT_RANGES[0],
       language: 'zh-CN',
     })
 
     expect(result.ok).toBe(true)
-    expect(result.payload.goalPageCount).toBe(MIN_AI_DECK_PAGE_COUNT)
-    expect(result.payload.goalPageCount).not.toBe(DEFAULT_AI_DECK_PAGE_COUNT)
+    expect(result.payload.goalPageCount).toBe(AI_DECK_PAGE_COUNT_RANGES[0].suggested)
+    expect(result.payload.pageCountRange?.key).toBe('compact')
   })
 
-  it('keeps explicit zero page count through component submit wiring and clamps it to the lower bound', async () => {
+  it('submits the selected page-count range instead of a manual page count', async () => {
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
       unobserve() {}
@@ -93,7 +111,8 @@ describe('AIDeckSetupForm input governance helpers', () => {
     createApp({
       render: () => h(AIDeckSetupForm, {
         topic: '',
-        goalPageCount: DEFAULT_AI_DECK_PAGE_COUNT,
+        goalPageCount: AI_DECK_PAGE_COUNT_RANGES[1].suggested,
+        pageCountRange: DEFAULT_AI_DECK_PAGE_COUNT_RANGE,
         language: 'zh-CN',
         onSubmit: (payload: unknown) => submitted.push(payload),
       }),
@@ -101,14 +120,14 @@ describe('AIDeckSetupForm input governance helpers', () => {
 
     const inputs = host.querySelectorAll('input')
     const topicInput = inputs[0] as HTMLInputElement
-    const pageCountInput = inputs[1] as HTMLInputElement
     const buttons = host.querySelectorAll('button')
+    const rangeButton = Array.from(buttons).find(button => button.textContent?.includes('16-20 页')) as HTMLButtonElement
     const submitButton = buttons[buttons.length - 1] as HTMLButtonElement
 
     topicInput.value = '季度复盘'
     topicInput.dispatchEvent(new Event('input', { bubbles: true }))
-    pageCountInput.value = '0'
-    pageCountInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    rangeButton.click()
     await nextTick()
 
     submitButton.click()
@@ -118,7 +137,14 @@ describe('AIDeckSetupForm input governance helpers', () => {
       {
         inputMode: 'simple',
         topic: '季度复盘',
-        goalPageCount: MIN_AI_DECK_PAGE_COUNT,
+        goalPageCount: 18,
+        pageCountRange: {
+          key: 'extended',
+          label: '16-20 页',
+          min: 16,
+          max: 20,
+          suggested: 18,
+        },
         language: 'zh-CN',
       },
     ])

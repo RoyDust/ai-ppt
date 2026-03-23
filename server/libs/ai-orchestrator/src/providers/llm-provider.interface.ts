@@ -8,10 +8,19 @@ export interface ResearchProjectInput {
   researchFramework?: string[]
 }
 
+export interface PageCountRange {
+  key: 'compact' | 'standard' | 'extended'
+  label: string
+  min: number
+  max: number
+  suggested: number
+}
+
 export interface DeckPlanRequest {
   topic: string
   language: string
   goalPageCount: number
+  pageCountRange?: PageCountRange
   inputMode?: 'simple' | 'research'
   researchBrief?: string
   researchInput?: ResearchProjectInput

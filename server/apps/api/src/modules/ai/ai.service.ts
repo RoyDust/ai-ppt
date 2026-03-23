@@ -211,6 +211,7 @@ export class AiService {
       return this.deckPlannerService.planDeck({
         topic: input.topic,
         goalPageCount: input.goalPageCount,
+        pageCountRange: input.pageCountRange,
         language: input.language,
         inputMode: input.inputMode,
         researchBrief: input.researchBrief,

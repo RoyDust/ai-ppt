@@ -55,9 +55,20 @@
         <div class="section-title">规划参数</div>
         <div class="control-grid">
           <div class="field-card">
-            <div class="field-label">目标页数</div>
-            <Input v-model:value="pageCountText" placeholder="10" />
-            <div class="field-note">用于限定规划边界，建议 8 到 15 页。</div>
+            <div class="field-label">页数范围</div>
+            <div class="range-switch">
+              <Button
+                v-for="option in pageCountOptions"
+                :key="option.key"
+                size="small"
+                type="checkbox"
+                :checked="selectedPageCountRange.key === option.key"
+                @click="selectedPageCountRange = option"
+              >
+                {{ option.label }}
+              </Button>
+            </div>
+            <div class="field-note">只给 AI 一个页数范围，由它在范围内决定最终页数。</div>
           </div>
 
           <div class="field-card">
@@ -88,7 +99,7 @@
     <section class="submit-bar panel">
       <div class="submit-copy">
         <div class="submit-title">准备启动规划</div>
-        <div class="submit-note">确认主题、页数和语言后，AI 会进入第一轮规划。</div>
+        <div class="submit-note">确认主题、页数范围和语言后，AI 会进入第一轮规划。</div>
       </div>
       <Button type="primary" class="submit-btn" :disabled="loading" @click="submit()">
         {{ loading ? '正在生成大纲...' : '生成大纲' }}
@@ -98,14 +109,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import Input from '@/components/Input.vue'
 import Select from '@/components/Select.vue'
 import Button from '@/components/Button.vue'
 import {
+  AI_DECK_PAGE_COUNT_RANGES,
+  DEFAULT_AI_DECK_PAGE_COUNT_RANGE,
   DEFAULT_AI_DECK_PAGE_COUNT,
+  inferPageCountRangeByGoal,
   normalizeDeckPlanInput,
-  normalizePageCount,
+  type AIPageCountRange,
   type AIPPTInputMode,
   type DeckPlanInput,
 } from '@/ai/types/deck'
@@ -113,11 +127,13 @@ import {
 const props = withDefaults(defineProps<{
   topic?: string
   goalPageCount?: number
+  pageCountRange?: AIPageCountRange
   language?: string
   loading?: boolean
 }>(), {
   topic: '',
   goalPageCount: 10,
+  pageCountRange: () => DEFAULT_AI_DECK_PAGE_COUNT_RANGE,
   language: 'zh-CN',
   loading: false,
 })
@@ -128,17 +144,12 @@ const emit = defineEmits<{
 
 const localTopic = ref(props.topic)
 const localLanguage = ref(props.language)
-const pageCountText = ref(String(props.goalPageCount))
+const pageCountOptions = AI_DECK_PAGE_COUNT_RANGES
+const selectedPageCountRange = ref<AIPageCountRange>(props.pageCountRange ?? inferPageCountRangeByGoal(props.goalPageCount))
 const inputMode = ref<AIPPTInputMode>('simple')
 const researchBrief = ref('')
 const errors = ref<Partial<Record<'topic' | 'researchBrief', string>>>({})
 const warnings = ref<Partial<Record<'researchBrief', string>>>({})
-const parsedPageCount = computed(() => {
-  const rawValue = pageCountText.value.trim()
-  if (!rawValue) return DEFAULT_AI_DECK_PAGE_COUNT
-  return normalizePageCount(Number(rawValue))
-})
-
 const setInputMode = (value: AIPPTInputMode) => {
   inputMode.value = value
   errors.value = {}
@@ -159,7 +170,8 @@ const submit = () => {
   const normalized = normalizeDeckPlanInput({
     inputMode: inputMode.value,
     topic: localTopic.value.trim(),
-    goalPageCount: parsedPageCount.value,
+    goalPageCount: selectedPageCountRange.value?.suggested ?? DEFAULT_AI_DECK_PAGE_COUNT,
+    pageCountRange: selectedPageCountRange.value,
     language: localLanguage.value,
     researchBrief: researchBrief.value,
   })
@@ -169,7 +181,7 @@ const submit = () => {
   if (!normalized.ok) return
 
   localTopic.value = normalized.payload.topic
-  pageCountText.value = String(normalized.payload.goalPageCount)
+  selectedPageCountRange.value = normalized.payload.pageCountRange ?? DEFAULT_AI_DECK_PAGE_COUNT_RANGE
   emit('submit', normalized.payload)
 }
 </script>
@@ -252,6 +264,13 @@ const submit = () => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   margin-top: 14px;
+}
+
+.range-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .field-card {

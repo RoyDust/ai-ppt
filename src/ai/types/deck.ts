@@ -6,6 +6,24 @@ export const MAX_AI_DECK_PAGE_COUNT = 15
 export const DEFAULT_AI_DECK_PAGE_COUNT = 10
 export const MAX_AI_DECK_TEXT_LENGTH = 280
 
+export type AIPageCountRangeKey = 'compact' | 'standard' | 'extended'
+
+export interface AIPageCountRange {
+  key: AIPageCountRangeKey
+  label: string
+  min: number
+  max: number
+  suggested: number
+}
+
+export const AI_DECK_PAGE_COUNT_RANGES: AIPageCountRange[] = [
+  { key: 'compact', label: '8-10 页', min: 8, max: 10, suggested: 9 },
+  { key: 'standard', label: '11-15 页', min: 11, max: 15, suggested: 12 },
+  { key: 'extended', label: '16-20 页', min: 16, max: 20, suggested: 18 },
+]
+
+export const DEFAULT_AI_DECK_PAGE_COUNT_RANGE = AI_DECK_PAGE_COUNT_RANGES[1]
+
 export type AIPPTInputMode = 'simple' | 'research'
 
 export interface ResearchProjectInput {
@@ -19,6 +37,7 @@ export interface AIDeck {
   id: string
   topic: string
   goalPageCount: number
+  pageCountRange?: AIPageCountRange
   actualPageCount: number
   language: string
   outlineSummary: string
@@ -35,6 +54,7 @@ export interface DeckPlanInput {
   inputMode?: AIPPTInputMode
   topic: string
   goalPageCount: number
+  pageCountRange?: AIPageCountRange
   language: string
   researchBrief?: string
   researchInput?: ResearchProjectInput
@@ -148,13 +168,41 @@ export const normalizePageCount = (value: number) => {
   return Math.max(MIN_AI_DECK_PAGE_COUNT, Math.min(MAX_AI_DECK_PAGE_COUNT, Math.round(value)))
 }
 
+export const resolvePageCountRange = (value?: Partial<AIPageCountRange> | null) => {
+  const key = value?.key
+  if (key) {
+    const byKey = AI_DECK_PAGE_COUNT_RANGES.find(item => item.key === key)
+    if (byKey) return byKey
+  }
+
+  if (typeof value?.min === 'number' && typeof value?.max === 'number') {
+    return {
+      key: (value.key as AIPageCountRangeKey | undefined) ?? DEFAULT_AI_DECK_PAGE_COUNT_RANGE.key,
+      label: value.label ?? `${value.min}-${value.max} 页`,
+      min: value.min,
+      max: value.max,
+      suggested: typeof value.suggested === 'number' ? value.suggested : Math.round((value.min + value.max) / 2),
+    } as AIPageCountRange
+  }
+
+  return undefined
+}
+
+export const inferPageCountRangeByGoal = (goalPageCount?: number) => {
+  if (!Number.isFinite(goalPageCount)) return DEFAULT_AI_DECK_PAGE_COUNT_RANGE
+  return AI_DECK_PAGE_COUNT_RANGES.find(item => goalPageCount! >= item.min && goalPageCount! <= item.max)
+    ?? DEFAULT_AI_DECK_PAGE_COUNT_RANGE
+}
+
 export const normalizeDeckPlanInput = (input: DeckPlanInput): DeckPlanInputNormalizationResult => {
   const inputMode = input.inputMode ?? 'simple'
   const topic = clampText(input.topic)
+  const pageCountRange = resolvePageCountRange(input.pageCountRange) ?? inferPageCountRangeByGoal(input.goalPageCount)
   const payload: DeckPlanInput = {
     inputMode,
     topic,
-    goalPageCount: normalizePageCount(input.goalPageCount),
+    goalPageCount: pageCountRange.suggested,
+    pageCountRange,
     language: input.language,
   }
   const errors: DeckPlanInputNormalizationResult['errors'] = {}

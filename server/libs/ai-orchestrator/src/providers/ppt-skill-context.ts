@@ -3,7 +3,20 @@ import path from 'node:path'
 
 type SkillStage = 'plan' | 'render' | 'regenerate'
 
+export interface PPTSkillProfile {
+  contentFirst: boolean
+  requiredPlanningDraftFields: string[]
+  genericTitlePatterns: RegExp[]
+  retryableQualityChecks: Array<'generic_title' | 'weak_evidence' | 'weak_research_reuse'>
+  qualityBar: {
+    minSupportingPoints: number
+    minEvidenceHintsForResearch: number
+  }
+  researchRules: string[]
+}
+
 let cachedSkillContext: Record<SkillStage, string> | null = null
+let cachedSkillProfile: PPTSkillProfile | null = null
 
 const loadSkillFile = (filename: string) => {
   const filePath = path.resolve(__dirname, '../../../../../src/skills', filename)
@@ -52,6 +65,37 @@ const buildSkillContext = (): Record<SkillStage, string> => {
   }
 }
 
+const buildSkillProfile = (): PPTSkillProfile => ({
+  contentFirst: true,
+  requiredPlanningDraftFields: [
+    'pageGoal',
+    'coreMessage',
+    'supportingPoints',
+    'evidenceHints',
+    'recommendedLayout',
+  ],
+  genericTitlePatterns: [
+    /^背景介绍$/,
+    /^现状分析$/,
+    /^总结建议$/,
+    /^总结$/,
+    /^建议$/,
+    /^行业分析$/,
+    /^研究背景$/,
+  ],
+  retryableQualityChecks: ['generic_title', 'weak_evidence', 'weak_research_reuse'],
+  qualityBar: {
+    minSupportingPoints: 2,
+    minEvidenceHintsForResearch: 1,
+  },
+  researchRules: [
+    '优先提炼用户提供的研究材料，不要只做泛泛背景介绍。',
+    '区分已知事实、判断和待确认事项。',
+    '每页都要回答“为什么这一页存在”。',
+    '如果是研究项目，至少一部分页面要直接复用项目背景、目标、样本或研究框架中的信息。',
+  ],
+})
+
 export const getPPTSkillContext = (stage: SkillStage) => {
   if (!cachedSkillContext) {
     cachedSkillContext = buildSkillContext()
@@ -59,3 +103,9 @@ export const getPPTSkillContext = (stage: SkillStage) => {
   return cachedSkillContext[stage]
 }
 
+export const getPPTSkillProfile = () => {
+  if (!cachedSkillProfile) {
+    cachedSkillProfile = buildSkillProfile()
+  }
+  return cachedSkillProfile
+}

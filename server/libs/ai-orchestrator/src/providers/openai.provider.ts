@@ -10,7 +10,7 @@ import type {
   ResearchProjectInput,
   SlideRegenerationResult,
 } from './llm-provider.interface'
-import { getPPTSkillContext } from './ppt-skill-context'
+import { getPPTSkillContext, getPPTSkillProfile, type PPTSkillProfile } from './ppt-skill-context'
 
 export interface OpenAIProviderOptions {
   apiKey?: string
@@ -215,6 +215,15 @@ const buildResearchQueries = (input: DeckPlanRequest) => {
 
 const truncate = (value: string, max = 220) => value.length > max ? `${value.slice(0, max - 1).trim()}…` : value
 
+const countKeywordMatches = (text: string, keywords: string[]) =>
+  keywords.filter(keyword => keyword && text.includes(keyword)).length
+
+const buildPlanRetryCritique = (issues: string[]) => [
+  '上一次规划存在以下问题，请严格修正后重新输出完整 deck JSON：',
+  ...issues.map((issue, index) => `${index + 1}. ${issue}`),
+  '重试要求：标题必须具体，planningDraft 必须包含真实证据线索，且要更充分复用用户研究输入。',
+].join('\n')
+
 const buildFallbackSlides = (topic: string, goalPageCount: number) => {
   const actualCount = Math.max(8, Math.min(goalPageCount, 10))
   const subject = deriveTopicSubject(topic)
@@ -409,6 +418,7 @@ const buildFallbackDeck = (input: DeckPlanRequest): AIDeck => {
     id: `draft_${Date.now()}`,
     topic: input.topic,
     goalPageCount: input.goalPageCount,
+    pageCountRange: input.pageCountRange,
     actualPageCount: slides.length,
     language: input.language,
     outlineSummary: summarizeTopic(input.topic),
@@ -427,6 +437,55 @@ const buildFallbackDeck = (input: DeckPlanRequest): AIDeck => {
     contentBlueprint: slides.map(slide => slide.title),
     slides,
   }
+}
+
+const assessPlanQuality = (deck: AIDeck, input: DeckPlanRequest, profile: PPTSkillProfile) => {
+  const issues: string[] = []
+  const contentSlides = deck.slides.filter(slide => slide.kind !== 'cover')
+
+  const genericTitleSlides = contentSlides
+    .filter((slide) => profile.genericTitlePatterns.some(pattern => pattern.test(slide.title || '')))
+    .map(slide => slide.title)
+
+  if (genericTitleSlides.length) {
+    issues.push(`标题过于空泛：${genericTitleSlides.join('、')}`)
+  }
+
+  const weakEvidenceSlides = contentSlides
+    .filter((slide) => {
+      const evidenceCount = slide.planningDraft?.evidenceHints?.filter(Boolean).length ?? 0
+      const supportCount = slide.planningDraft?.supportingPoints?.filter(Boolean).length ?? 0
+      return supportCount < profile.qualityBar.minSupportingPoints || (
+        input.inputMode === 'research' && evidenceCount < profile.qualityBar.minEvidenceHintsForResearch
+      )
+    })
+    .map(slide => slide.title)
+
+  if (weakEvidenceSlides.length) {
+    issues.push(`证据线索偏弱：${weakEvidenceSlides.join('、')}`)
+  }
+
+  if (input.inputMode === 'research') {
+    const researchKeywords = extractPlanningKeywords(input).slice(0, 8)
+    const combinedText = deck.slides
+      .flatMap(slide => [
+        slide.title,
+        slide.summary,
+        ...(slide.bullets ?? []),
+        slide.planningDraft?.pageGoal,
+        slide.planningDraft?.coreMessage,
+        ...(slide.planningDraft?.evidenceHints ?? []),
+      ])
+      .filter(Boolean)
+      .join(' ')
+    const keywordMatches = countKeywordMatches(combinedText, researchKeywords)
+    const minMatches = Math.min(2, researchKeywords.length)
+    if (researchKeywords.length && keywordMatches < minMatches) {
+      issues.push('对用户研究输入的复用不足')
+    }
+  }
+
+  return issues
 }
 
 export class OpenAIProvider implements LLMProvider {
@@ -547,6 +606,7 @@ export class OpenAIProvider implements LLMProvider {
   async planDeck(input: DeckPlanRequest): Promise<DeckPlanResult> {
     const apiKey = this.options.apiKey ?? process.env.OPENAI_API_KEY
     const baseURL = (this.options.baseURL ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '')
+    const skillProfile = getPPTSkillProfile()
 
     if (!apiKey) {
       return { deck: buildFallbackDeck(input) }
@@ -555,69 +615,89 @@ export class OpenAIProvider implements LLMProvider {
     try {
       const researchDigest = digestResearchInput(input)
       const externalResearch = await this.gatherExternalResearchContext(input)
-      const json = await this.requestChatCompletion(baseURL, apiKey, {
-        model: this.model,
-        temperature: 0.6,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: [
-              '你是顶级演示文稿策划专家。',
-              '目标不是简单列标题，而是生成可直接用于 PPT 设计的规划结果。',
-              '输出 JSON，字段必须包含：id, topic, goalPageCount, actualPageCount, language, outlineSummary, templateId, designSystem, themeName, designRequirements, designCharacteristics, contentBlueprint, slides。',
-              '每个 slide 必须包含：id, kind, title, summary, bullets, regeneratable, designRequirements, designFeatures, layoutInstructions, validationResult, planningDraft, metadata。',
-              'planningDraft 是每页显式策划稿，必须包含：pageGoal, coreMessage, audienceTakeaway, supportingPoints, evidenceHints, narrativeFlow, recommendedLayout, visualDirection, designNotes, forbiddenContent, sourceAnchors。',
-              'metadata 内必须包含 layoutTemplate 和 pageNumber。',
-              'templateId 固定输出 MASTER_TEMPLATE_AI。',
-              'layoutTemplate 只能从以下集合选择：master_cover, master_section, master_toc, master_timeline, master_split, master_grid, master_compare, master_table, master_summary, master_closing。',
-              'slides 需要真正拆解主题，避免重复用户原话，避免“第 N 页”式占位标题。',
-              '面向新手时，优先解决理解门槛、常见误区、观看抓手和行动清单。',
-              '同一份 deck 中，相邻两页不要使用相同 layoutTemplate，除非内容强依赖连续对照。',
-              'title、summary、bullets 是最终会显示在 PPT 上的可见内容，绝对不要输出“副标题：”“关键词：”“设计说明：”“布局说明：”“提示：”这类标签化元文本。',
-              '不要把设计意图、版式建议、占位图说明、装饰说明写进 title、summary、bullets。',
-              `全局设计系统固定为 ${DEFAULT_DESIGN_SYSTEM}，严格使用配色 ${DESIGN_COLORS.join(' ')}`,
-              '中文字体固定 Microsoft YaHei，英文字体固定 Arial。',
-              '所有页面必须服从 MASTER_TEMPLATE_AI 的商务提案母版风格、底部彩带页脚和统一留白系统。',
-              '当适合做封面或章节页时允许使用占位大图，但不要依赖真实图片素材。',
-              '目录页必须给出 4 到 6 个具体主题项，不能只写抽象口号。',
-              '对比页必须给出左右两栏各自的明确标题与 1 到 2 句具体解释，不能只给一句短语。',
-              '表格页必须给出结构化条目，确保每行都能独立成立。',
-              '如果用户提供了研究资料，必须优先提炼其中的事实、目标、样本、框架与限制条件，不能把这些材料忽略掉。',
-              '如果提供了外部检索补充，只能把它作为补强证据使用，不能压过用户原始输入。',
-              'outlineSummary 必须能概括核心问题、洞察路径与商业动作，不能写成空泛摘要。',
-              'slides 中每一页都必须有真实信息增量，例如：用户分层、行为逻辑、市场趋势、机会方向、案例对照、策略动作、验证路径。',
-              '禁止生成“背景介绍、现状分析、总结建议”这种万能废话页名，标题必须贴合主题语义。',
-              '如果输入是研究项目，必须把项目背景、目标、样本设计、研究框架转译成更适合汇报的叙事结构，而不是原文搬运。',
-            ].join('\n'),
-          },
-          {
-            role: 'system',
-            content: getPPTSkillContext('plan'),
-          },
-          {
-            role: 'user',
-            content: [
-              `主题：${input.topic}`,
-              `目标页数：${input.goalPageCount}`,
-              `语言：${input.language}`,
-              `输入模式：${input.inputMode ?? 'simple'}`,
-              researchDigest ? `用户提供的研究材料：\n${researchDigest}` : '用户未提供额外研究材料。',
-              externalResearch ? `外部检索补充：\n${externalResearch}` : '外部检索补充：暂无可靠结果，请优先深挖用户输入。',
-              `主题关键词：${extractPlanningKeywords(input).join('、') || input.topic}`,
-              '请返回适合制作美观简洁 PPT 的完整策划 JSON。',
-            ].join('\n'),
-          },
-        ],
-      })
-      const content = json?.choices?.[0]?.message?.content
-      if (typeof content !== 'string') {
-        throw new Error('Missing model content')
+      const pageCountRangeText = input.pageCountRange
+        ? `${input.pageCountRange.label}（最少 ${input.pageCountRange.min} 页，最多 ${input.pageCountRange.max} 页，建议值 ${input.pageCountRange.suggested} 页）`
+        : `${input.goalPageCount} 页`
+      const requestPlan = async (critique?: string) => {
+        const json = await this.requestChatCompletion(baseURL, apiKey, {
+          model: this.model,
+          temperature: 0.6,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: [
+                '你是顶级演示文稿策划专家。',
+                '目标不是简单列标题，而是生成可直接用于 PPT 设计的规划结果。',
+                '输出 JSON，字段必须包含：id, topic, goalPageCount, actualPageCount, language, outlineSummary, templateId, designSystem, themeName, designRequirements, designCharacteristics, contentBlueprint, slides。',
+                '每个 slide 必须包含：id, kind, title, summary, bullets, regeneratable, designRequirements, designFeatures, layoutInstructions, validationResult, planningDraft, metadata。',
+                'planningDraft 是每页显式策划稿，必须包含：pageGoal, coreMessage, audienceTakeaway, supportingPoints, evidenceHints, narrativeFlow, recommendedLayout, visualDirection, designNotes, forbiddenContent, sourceAnchors。',
+                `planningDraft 至少要满足：supportingPoints >= ${skillProfile.qualityBar.minSupportingPoints}。`,
+                input.inputMode === 'research'
+                  ? `研究模式下，每页 planningDraft.evidenceHints 至少要有 ${skillProfile.qualityBar.minEvidenceHintsForResearch} 条。`
+                  : '非研究模式也要尽量提供 evidenceHints。',
+                `禁止空泛标题，尤其包括：${skillProfile.genericTitlePatterns.map(pattern => pattern.source.replace(/[\^$\\]/g, '')).join('、')}。`,
+                ...skillProfile.researchRules,
+                'metadata 内必须包含 layoutTemplate 和 pageNumber。',
+                'templateId 固定输出 MASTER_TEMPLATE_AI。',
+                'layoutTemplate 只能从以下集合选择：master_cover, master_section, master_toc, master_timeline, master_split, master_grid, master_compare, master_table, master_summary, master_closing。',
+                'slides 需要真正拆解主题，避免重复用户原话，避免“第 N 页”式占位标题。',
+                '面向新手时，优先解决理解门槛、常见误区、观看抓手和行动清单。',
+                '同一份 deck 中，相邻两页不要使用相同 layoutTemplate，除非内容强依赖连续对照。',
+                'title、summary、bullets 是最终会显示在 PPT 上的可见内容，绝对不要输出“副标题：”“关键词：”“设计说明：”“布局说明：”“提示：”这类标签化元文本。',
+                '不要把设计意图、版式建议、占位图说明、装饰说明写进 title、summary、bullets。',
+                `全局设计系统固定为 ${DEFAULT_DESIGN_SYSTEM}，严格使用配色 ${DESIGN_COLORS.join(' ')}`,
+                '中文字体固定 Microsoft YaHei，英文字体固定 Arial。',
+                '所有页面必须服从 MASTER_TEMPLATE_AI 的商务提案母版风格、底部彩带页脚和统一留白系统。',
+                '当适合做封面或章节页时允许使用占位大图，但不要依赖真实图片素材。',
+                '目录页必须给出 4 到 6 个具体主题项，不能只写抽象口号。',
+                '对比页必须给出左右两栏各自的明确标题与 1 到 2 句具体解释，不能只给一句短语。',
+                '表格页必须给出结构化条目，确保每行都能独立成立。',
+                '如果用户提供了研究资料，必须优先提炼其中的事实、目标、样本、框架与限制条件，不能把这些材料忽略掉。',
+                '如果提供了外部检索补充，只能把它作为补强证据使用，不能压过用户原始输入。',
+                'outlineSummary 必须能概括核心问题、洞察路径与商业动作，不能写成空泛摘要。',
+                'slides 中每一页都必须有真实信息增量，例如：用户分层、行为逻辑、市场趋势、机会方向、案例对照、策略动作、验证路径。',
+                '禁止生成“背景介绍、现状分析、总结建议”这种万能废话页名，标题必须贴合主题语义。',
+                '如果输入是研究项目，必须把项目背景、目标、样本设计、研究框架转译成更适合汇报的叙事结构，而不是原文搬运。',
+              ].join('\n'),
+            },
+            {
+              role: 'system',
+              content: getPPTSkillContext('plan'),
+            },
+            {
+              role: 'user',
+              content: [
+                `主题：${input.topic}`,
+                `目标页数：${input.goalPageCount}`,
+                `页数范围：${pageCountRangeText}`,
+                `语言：${input.language}`,
+                `输入模式：${input.inputMode ?? 'simple'}`,
+                researchDigest ? `用户提供的研究材料：\n${researchDigest}` : '用户未提供额外研究材料。',
+                externalResearch ? `外部检索补充：\n${externalResearch}` : '外部检索补充：暂无可靠结果，请优先深挖用户输入。',
+                `主题关键词：${extractPlanningKeywords(input).join('、') || input.topic}`,
+                critique || '请在给定页数范围内自行决定最合适的最终页数，并返回适合制作美观简洁 PPT 的完整策划 JSON。',
+              ].join('\n'),
+            },
+          ],
+        })
+        const content = json?.choices?.[0]?.message?.content
+        if (typeof content !== 'string') {
+          throw new Error('Missing model content')
+        }
+        const parsed = extractJson(content)
+        const deck = this.normalizeDeck(parsed, input)
+        return deck
       }
 
-      const parsed = extractJson(content)
-      const deck = this.normalizeDeck(parsed, input)
-      return { deck }
+      const firstDeck = await requestPlan()
+      const firstIssues = assessPlanQuality(firstDeck, input, skillProfile)
+      if (!firstIssues.length) {
+        return { deck: firstDeck }
+      }
+
+      const retriedDeck = await requestPlan(buildPlanRetryCritique(firstIssues))
+      return { deck: retriedDeck }
     }
     catch {
       return { deck: buildFallbackDeck(input) }
@@ -782,6 +862,9 @@ export class OpenAIProvider implements LLMProvider {
       id: typeof value.id === 'string' ? value.id : fallback.id,
       topic: typeof value.topic === 'string' ? value.topic : fallback.topic,
       goalPageCount: typeof value.goalPageCount === 'number' ? value.goalPageCount : fallback.goalPageCount,
+      pageCountRange: value.pageCountRange && typeof value.pageCountRange === 'object'
+        ? value.pageCountRange as AIDeck['pageCountRange']
+        : fallback.pageCountRange,
       actualPageCount: slides.length || fallback.actualPageCount,
       language: typeof value.language === 'string' ? value.language : fallback.language,
       outlineSummary: typeof value.outlineSummary === 'string' ? value.outlineSummary : fallback.outlineSummary,

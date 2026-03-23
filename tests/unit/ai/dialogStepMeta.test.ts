@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { getAIPPTDialogMeta } from '@/ai/utils/dialogStepMeta'
+import { AI_DECK_PAGE_COUNT_RANGES } from '@/ai/types/deck'
 
 describe('getAIPPTDialogMeta', () => {
   it('builds setup-step workbench metadata with configuration summary', () => {
     const meta = getAIPPTDialogMeta({
       step: 'setup',
       goalPageCount: 12,
+      pageCountRange: AI_DECK_PAGE_COUNT_RANGES[1],
       language: 'en-US',
       topic: 'AI 产品路线图',
       isPlanning: false,
@@ -16,7 +18,7 @@ describe('getAIPPTDialogMeta', () => {
     expect(meta.badgeLabel).toBe('规划阶段')
     expect(meta.summaryItems).toEqual([
       { label: '主题', value: 'AI 产品路线图' },
-      { label: '目标页数', value: '12 页' },
+      { label: '页数范围', value: '11-15 页' },
       { label: '输出语言', value: 'English' },
     ])
     expect(meta.guidance[0]).toContain('规划')
@@ -26,6 +28,7 @@ describe('getAIPPTDialogMeta', () => {
     const meta = getAIPPTDialogMeta({
       step: 'generating',
       goalPageCount: 10,
+      pageCountRange: AI_DECK_PAGE_COUNT_RANGES[0],
       language: 'zh-CN',
       topic: '年度总结',
       isPlanning: false,

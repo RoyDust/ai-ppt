@@ -86,6 +86,7 @@ describe('OpenAIProvider', () => {
       baseURL: 'http://test.local/v1',
       model: 'test-model',
       fetchImpl,
+      searchFetcher: vi.fn(async () => []),
     })
 
     const result = await provider.planDeck({
@@ -280,6 +281,183 @@ describe('OpenAIProvider', () => {
     expect(skillPrompt).toContain('PPT 的灵魂是内容，不是皮囊')
     expect(skillPrompt).toContain('Planning Draft / 策划稿生成')
     expect(requestPayload.messages[0].content).toContain('planningDraft')
+  })
+
+  it('includes page-count range guidance in the planning prompt', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                id: 'deck_1',
+                topic: '季度复盘',
+                goalPageCount: 12,
+                actualPageCount: 12,
+                language: 'zh-CN',
+                outlineSummary: '围绕重点业务、问题与动作形成复盘',
+                slides: [],
+              }),
+            },
+          },
+        ],
+      }),
+    })) as any
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'http://test.local/v1',
+      model: 'test-model',
+      fetchImpl,
+      searchFetcher: vi.fn(async () => []),
+    })
+
+    await provider.planDeck({
+      topic: '季度复盘',
+      goalPageCount: 12,
+      pageCountRange: {
+        key: 'standard',
+        label: '11-15 页',
+        min: 11,
+        max: 15,
+        suggested: 12,
+      },
+      language: 'zh-CN',
+    })
+
+    const requestPayload = JSON.parse(fetchImpl.mock.calls[0][1].body)
+    const userPrompt = requestPayload.messages[2].content as string
+    expect(userPrompt).toContain('页数范围：11-15 页')
+    expect(userPrompt).toContain('最少 11 页，最多 15 页')
+  })
+
+  it('retries plan generation once when the first result is too generic', async () => {
+    let attempt = 0
+    const fetchImpl = vi.fn(async (_url, options: any) => {
+      const body = JSON.parse(options.body)
+      attempt += 1
+
+      if (attempt === 1) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    id: 'deck_generic',
+                    topic: '独居家电关联购买研究',
+                    goalPageCount: 2,
+                    actualPageCount: 2,
+                    language: 'zh-CN',
+                    outlineSummary: '背景介绍与总结建议',
+                    slides: [
+                      {
+                        id: 'slide_1',
+                        kind: 'content',
+                        title: '背景介绍',
+                        summary: '介绍研究背景。',
+                        bullets: ['背景一', '背景二'],
+                        planningDraft: {
+                          pageGoal: '介绍背景',
+                          coreMessage: '这是背景',
+                          supportingPoints: ['背景一'],
+                          evidenceHints: [],
+                          recommendedLayout: 'master_split',
+                        },
+                        regeneratable: true,
+                        metadata: { layoutTemplate: 'master_split', pageNumber: 1 },
+                      },
+                      {
+                        id: 'slide_2',
+                        kind: 'summary',
+                        title: '总结建议',
+                        summary: '总结建议。',
+                        bullets: ['建议一'],
+                        planningDraft: {
+                          pageGoal: '总结建议',
+                          coreMessage: '给出建议',
+                          supportingPoints: ['建议一'],
+                          evidenceHints: [],
+                          recommendedLayout: 'master_summary',
+                        },
+                        regeneratable: true,
+                        metadata: { layoutTemplate: 'master_summary', pageNumber: 2 },
+                      },
+                    ],
+                  }),
+                },
+              },
+            ],
+          }),
+        } as any
+      }
+
+      expect(body.messages[2].content).toContain('上一次规划存在以下问题')
+      expect(body.messages[2].content).toContain('标题过于空泛')
+      expect(body.messages[2].content).toContain('证据线索偏弱')
+
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  id: 'deck_better',
+                  topic: '独居家电关联购买研究',
+                  goalPageCount: 2,
+                  actualPageCount: 2,
+                  language: 'zh-CN',
+                  outlineSummary: '从独居场景、功能互补与生意机会三层推进',
+                  slides: [
+                    {
+                      id: 'slide_1',
+                      kind: 'content',
+                      title: '独居厨房为什么会触发组合购买',
+                      summary: '先解释场景压力，再解释功能互补。',
+                      bullets: ['厨房面积有限', '一人食频率高'],
+                      planningDraft: {
+                        pageGoal: '解释组合购买的真实触发场景',
+                        coreMessage: '组合购买首先是场景效率问题，而不是单纯凑单',
+                        supportingPoints: ['厨房面积有限', '减少重复决策'],
+                        evidenceHints: ['项目背景提到电饭煲+空气炸锅', '独居场景需求增长'],
+                        recommendedLayout: 'master_split',
+                      },
+                      regeneratable: true,
+                      metadata: { layoutTemplate: 'master_split', pageNumber: 1 },
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        }),
+      } as any
+    })
+
+    const provider = new OpenAIProvider({
+      apiKey: 'test-key',
+      baseURL: 'http://test.local/v1',
+      model: 'test-model',
+      fetchImpl,
+    })
+
+    const result = await provider.planDeck({
+      inputMode: 'research',
+      topic: '独居家电关联购买研究',
+      goalPageCount: 2,
+      language: 'zh-CN',
+      researchInput: {
+        projectBackground: ['平台已观测到电饭煲+空气炸锅组合'],
+        projectObjectives: ['挖掘独居用户的关联购买动机'],
+      },
+    })
+
+    expect(attempt).toBe(2)
+    expect(result.deck.id).toBe('deck_better')
+    expect(result.deck.slides[0]?.title).toBe('独居厨房为什么会触发组合购买')
   })
 
   it('renders an edited planning deck into a richer final deck through second-pass ai', async () => {

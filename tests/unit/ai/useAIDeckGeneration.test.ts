@@ -116,6 +116,13 @@ describe('useAIDeckGeneration', () => {
       inputMode: 'research',
       topic: '  2026 用户研究  ',
       goalPageCount: 99,
+      pageCountRange: {
+        key: 'extended',
+        label: '16-20 页',
+        min: 16,
+        max: 20,
+        suggested: 18,
+      },
       language: 'zh-CN',
       researchInput: {
         projectBackground: ['  背景  ', ''],
@@ -128,11 +135,19 @@ describe('useAIDeckGeneration', () => {
     expect(planDeckMock).toHaveBeenCalledWith({
       inputMode: 'research',
       topic: '2026 用户研究',
-      goalPageCount: 15,
+      goalPageCount: 18,
+      pageCountRange: {
+        key: 'extended',
+        label: '16-20 页',
+        min: 16,
+        max: 20,
+        suggested: 18,
+      },
       language: 'zh-CN',
       researchInput: {
         projectBackground: ['背景'],
         projectObjectives: ['目标一', '目标二'],
+        sampleDesign: undefined,
         researchFramework: ['框架'],
       },
     })
