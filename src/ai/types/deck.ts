@@ -76,6 +76,22 @@ export interface DeckRenderResponse {
   id: string
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'partial_success'
   type?: string
+  error?: string
+}
+
+export type AIRenderBatchStatus = 'pending' | 'running' | 'retrying' | 'succeeded' | 'failed'
+export type AIRenderFailureCategory = 'timeout' | 'rate_limit' | 'server_error' | 'invalid_output' | 'unknown'
+
+export interface AIRenderBatchDetail {
+  batchIndex: number
+  batchCount?: number
+  slideStart: number
+  slideEnd: number
+  status: AIRenderBatchStatus
+  retryCount: number
+  canRetry?: boolean
+  failureCategory?: AIRenderFailureCategory
+  errorMessage?: string
 }
 
 export interface AIRenderProgress {
@@ -83,6 +99,7 @@ export interface AIRenderProgress {
   completedBatches: number
   failedBatches: number
   retryingBatches: number
+  batches?: AIRenderBatchDetail[]
 }
 
 export interface AITaskResponse {

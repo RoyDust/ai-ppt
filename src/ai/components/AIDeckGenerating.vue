@@ -23,7 +23,40 @@
             <div class="status-label">最近轮询</div>
             <div class="status-value">{{ lastPolledAt }}</div>
           </div>
+          <div class="status-card">
+            <div class="status-label">批次数量</div>
+            <div class="status-value">{{ progress.totalBatches || 0 }}</div>
+          </div>
         </div>
+
+        <div v-if="progress.batches?.length" class="batch-list">
+          <div
+            v-for="batch in progress.batches"
+            :key="batch.batchIndex"
+            class="batch-card"
+            :class="`status-${batch.status}`"
+          >
+            <div class="batch-title">Batch {{ batch.batchIndex + 1 }}</div>
+            <div class="batch-meta">第 {{ batch.slideStart + 1 }}-{{ batch.slideEnd }} 页</div>
+            <div class="batch-meta">状态：{{ batch.status }}</div>
+            <div class="batch-meta">尝试次数：{{ batch.retryCount }}</div>
+            <div v-if="batch.failureCategory" class="batch-error">{{ batch.failureCategory }}</div>
+            <div v-if="batch.errorMessage" class="batch-error-detail">{{ batch.errorMessage }}</div>
+          </div>
+        </div>
+
+        <div v-if="renderState === 'partial_success'" class="partial-error">
+          {{ renderError || '部分批次生成失败，可重跑失败批次。' }}
+        </div>
+
+        <button
+          v-if="canRetryFailedBatches"
+          class="retry-button"
+          type="button"
+          @click="onRetryFailedBatches?.()"
+        >
+          重跑失败批次
+        </button>
 
         <div class="note">保持窗口打开即可，生成完成后会自动回写到编辑器。</div>
       </div>
@@ -32,8 +65,15 @@
 </template>
 
 <script setup lang="ts">
+import type { AIRenderProgress } from '../types/deck'
+
 defineProps<{
   lastPolledAt?: string
+  progress: AIRenderProgress
+  renderState?: 'idle' | 'loading' | 'success' | 'error' | 'partial_success'
+  renderError?: string
+  canRetryFailedBatches?: boolean
+  onRetryFailedBatches?: () => void | Promise<void>
 }>()
 </script>
 
@@ -106,9 +146,53 @@ defineProps<{
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-top: 22px;
+}
+
+.batch-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 22px;
+  text-align: left;
+}
+
+.batch-card {
+  padding: 14px;
+  border: 1px solid #eef0f3;
+  border-radius: 10px;
+  background: #fafafb;
+}
+
+.batch-title {
+  font-weight: 700;
+  color: #20262e;
+}
+
+.batch-meta,
+.batch-error,
+.batch-error-detail,
+.partial-error {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #6b7280;
+}
+
+.batch-error,
+.partial-error {
+  color: #b42318;
+}
+
+.retry-button {
+  margin-top: 18px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: #d14424;
+  color: #fff;
+  cursor: pointer;
 }
 
 .status-card {

@@ -598,7 +598,12 @@ describe('AiService', () => {
     } as any)
 
     expect(planner.planDeck).not.toHaveBeenCalled()
-    expect(renderer.render).toHaveBeenCalledWith(editedDeck)
+    expect(renderer.render).toHaveBeenCalledWith(
+      editedDeck,
+      expect.objectContaining({
+        onProgress: expect.any(Function),
+      }),
+    )
     expect(enqueueAsync).toHaveBeenCalledWith(
       'deck_render',
       expect.objectContaining({

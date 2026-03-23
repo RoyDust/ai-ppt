@@ -62,4 +62,42 @@ describe('render batch utils', () => {
     expect(result.deck.slides[2].title).toBe('ok-3-retry')
     expect(result.deck.slides[3].title).toBe('ok-4-retry')
   })
+
+  it('returns partial success details when some batches still fail after retries', async () => {
+    const renderDeckBatch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        slides: [
+          { id: 's1', kind: 'content', title: 'ok-1' },
+          { id: 's2', kind: 'content', title: 'ok-2' },
+        ],
+      })
+      .mockRejectedValue(new Error('429 rate limit'))
+
+    const service = new DeckRendererService({ renderDeckBatch } as any, { convert: vi.fn(() => []) } as any)
+    const result = await service.render({
+      id: 'deck_2',
+      topic: 'Topic',
+      goalPageCount: 4,
+      actualPageCount: 4,
+      language: 'zh-CN',
+      outlineSummary: 'Summary',
+      slides: [
+        { id: 's1', kind: 'content', title: '1', bullets: [] },
+        { id: 's2', kind: 'content', title: '2', bullets: [] },
+        { id: 's3', kind: 'content', title: '3', bullets: [] },
+        { id: 's4', kind: 'content', title: '4', bullets: [] },
+      ],
+    } as any)
+
+    expect(result.partialSuccess).toBe(true)
+    expect(result.progress.failedBatches).toBe(1)
+    expect(result.progress.batches[1]).toMatchObject({
+      batchIndex: 1,
+      status: 'failed',
+      failureCategory: 'rate_limit',
+      retryCount: 3,
+      canRetry: true,
+    })
+  })
 })

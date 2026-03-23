@@ -16,22 +16,25 @@ const planDeckMock = vi.fn(() => Promise.resolve({
   slides: [],
   plannedPageCount: 10,
 }))
+const retryFailedRenderBatchesMock = vi.fn(() => Promise.resolve({ id: 'task_1', status: 'running' }))
+const getAITaskMock = vi.fn(() => Promise.resolve({
+  id: 'task_1',
+  status: 'succeeded',
+  output: {
+    deck: { id: 'deck_1', topic: '大学生职业生涯规划', goalPageCount: 10, actualPageCount: 10, language: 'zh-CN', outlineSummary: '', slides: [] },
+    slides: [{ id: 'slide_1', elements: [], background: { type: 'solid', color: '#fff' } }],
+  },
+}))
 
 vi.mock('@/ai/services/aiDeck', () => ({
   planDeck: planDeckMock,
   renderDeck: vi.fn(() => Promise.resolve({ id: 'task_1', status: 'queued' })),
+  retryFailedRenderBatches: retryFailedRenderBatchesMock,
   acceptDeckRender: vi.fn(() => Promise.resolve({
     versionId: 'version_1',
     slides: [{ id: 'slide_final', elements: [], background: { type: 'solid', color: '#f4f7fb' } }],
   })),
-  getAITask: vi.fn(() => Promise.resolve({
-    id: 'task_1',
-    status: 'succeeded',
-    output: {
-      deck: { id: 'deck_1', topic: '大学生职业生涯规划', goalPageCount: 10, actualPageCount: 10, language: 'zh-CN', outlineSummary: '', slides: [] },
-      slides: [{ id: 'slide_1', elements: [], background: { type: 'solid', color: '#fff' } }],
-    },
-  })),
+  getAITask: getAITaskMock,
 }))
 
 const loadSlidesIntoEditor = vi.fn()
@@ -53,6 +56,16 @@ describe('useAIDeckGeneration', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     planDeckMock.mockClear()
+    retryFailedRenderBatchesMock.mockClear()
+    getAITaskMock.mockReset()
+    getAITaskMock.mockResolvedValue({
+      id: 'task_1',
+      status: 'succeeded',
+      output: {
+        deck: { id: 'deck_1', topic: '大学生职业生涯规划', goalPageCount: 10, actualPageCount: 10, language: 'zh-CN', outlineSummary: '', slides: [] },
+        slides: [{ id: 'slide_1', elements: [], background: { type: 'solid', color: '#fff' } }],
+      },
+    })
     vi.mocked(message.error).mockClear()
     vi.mocked(message.warning).mockClear()
   })
@@ -220,5 +233,56 @@ describe('useAIDeckGeneration', () => {
     expect(generation.editableDeck.value?.slides[0]?.planningDraft?.pageGoal).toBe('解释真实触发场景')
     expect(generation.editableDeck.value?.slides[0]?.planningDraft?.coreMessage).toBe('场景压力比价格优惠更能驱动组合购买')
     expect(generation.editableDeck.value?.slides[0]?.planningDraft?.supportingPoints).toEqual(['厨房面积有限', '减少反复决策'])
+  })
+
+  it('keeps generating view open on partial success and retries failed batches on demand', async () => {
+    getAITaskMock
+      .mockResolvedValueOnce({
+        id: 'task_1',
+        status: 'partial_success',
+        progress: {
+          totalBatches: 2,
+          completedBatches: 1,
+          failedBatches: 1,
+          retryingBatches: 0,
+          batches: [
+            { batchIndex: 0, slideStart: 0, slideEnd: 2, status: 'succeeded', retryCount: 1 },
+            { batchIndex: 1, slideStart: 2, slideEnd: 4, status: 'failed', retryCount: 3, failureCategory: 'rate_limit', errorMessage: '429 rate limit', canRetry: true },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        id: 'task_1',
+        status: 'succeeded',
+        progress: {
+          totalBatches: 2,
+          completedBatches: 2,
+          failedBatches: 0,
+          retryingBatches: 0,
+          batches: [
+            { batchIndex: 0, slideStart: 0, slideEnd: 2, status: 'succeeded', retryCount: 1 },
+            { batchIndex: 1, slideStart: 2, slideEnd: 4, status: 'succeeded', retryCount: 1 },
+          ],
+        },
+        output: {
+          deck: { id: 'deck_1', topic: '大学生职业生涯规划', goalPageCount: 10, actualPageCount: 10, language: 'zh-CN', outlineSummary: '', slides: [] },
+          slides: [{ id: 'slide_1', elements: [], background: { type: 'solid', color: '#fff' } }],
+        },
+      })
+
+    const { default: useAIDeckGeneration } = await import('@/ai/hooks/useAIDeckGeneration')
+    const generation = useAIDeckGeneration()
+
+    await generation.createPlan({ topic: '大学生职业生涯规划', goalPageCount: 10, language: 'zh-CN' })
+    const partialTask = await generation.renderPlannedDeck()
+
+    expect(partialTask?.status).toBe('partial_success')
+    expect(generation.step.value).toBe('generating')
+    expect(generation.renderState.value).toBe('partial_success')
+
+    await generation.retryFailedBatches()
+
+    expect(retryFailedRenderBatchesMock).toHaveBeenCalledWith('task_1')
+    expect(generation.renderState.value).toBe('success')
   })
 })

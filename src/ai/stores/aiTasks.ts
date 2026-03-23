@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import type { AIRenderProgress } from '../types/deck'
 
 export type AIPlanningState = 'idle' | 'loading' | 'success' | 'error'
-export type AIRenderState = 'idle' | 'loading' | 'success' | 'error'
+export type AIRenderState = 'idle' | 'loading' | 'success' | 'error' | 'partial_success'
 
 interface AITasksState {
   planningState: AIPlanningState

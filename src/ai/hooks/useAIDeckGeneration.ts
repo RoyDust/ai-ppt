@@ -5,7 +5,7 @@ import message from '@/utils/message'
 import { useAIDeckStore } from '../stores/aiDeck'
 import { useAITasksStore } from '../stores/aiTasks'
 import useAIDeckLoader from './useAIDeckLoader'
-import { acceptDeckRender, getAITask, planDeck, renderDeck } from '../services/aiDeck'
+import { acceptDeckRender, getAITask, planDeck, renderDeck, retryFailedRenderBatches as retryFailedRenderBatchesRequest } from '../services/aiDeck'
 import { normalizeDeckPlanInput, type DeckPlanInput } from '../types/deck'
 import type { AIPageCountRange, DeckPlanResponse } from '../types/deck'
 import type { AISlidePlanningDraft } from '../types/slide'
@@ -25,10 +25,12 @@ export default () => {
   const language = ref('zh-CN')
 
   const { editableDeck, plannedPageCount } = storeToRefs(aiDeckStore)
-  const { lastPolledAt, planningState, renderState } = storeToRefs(aiTasksStore)
+  const { lastPolledAt, planningState, renderError, renderProgress, renderState } = storeToRefs(aiTasksStore)
   const outlineSlides = computed(() => editableDeck.value?.slides ?? [])
   const isPlanning = computed(() => planningState.value === 'loading')
   const isRendering = computed(() => renderState.value === 'loading')
+  const canRetryFailedBatches = computed(() =>
+    renderState.value === 'partial_success' && (renderProgress.value.batches?.some(batch => batch.status === 'failed' && batch.canRetry) ?? false))
   const loadingText = computed(() => {
     if (isPlanning.value) return '正在生成大纲，请稍候...'
     if (isRendering.value) return '正在创建 PPT，请稍候...'
@@ -88,6 +90,45 @@ export default () => {
     }
   }
 
+  const handleRenderTask = async (taskId: string) => {
+    const currentTask = await pollAITaskUntilSettled(getAITask, taskId, {
+      intervalMs: 1000,
+      onPoll: (polledTask) => {
+        aiTasksStore.setLastPolledAt(formatPollTime())
+        if (polledTask?.progress) {
+          aiTasksStore.setRenderProgress(polledTask.progress)
+        }
+      },
+    })
+
+    if (currentTask.status === 'succeeded' && currentTask.output) {
+      aiTasksStore.setRenderState('success')
+      aiDeckStore.setRenderedDeck(currentTask.output.deck)
+      const accepted = await acceptDeckRender({
+        deckId: currentTask.output.deck.id,
+        createdBy: 'system',
+        sourceTaskId: currentTask.id,
+      })
+      mainStore.setCurrentDeckContext(accepted.deckId || currentTask.output.deck.id, accepted.versionId)
+      loadSlidesIntoEditor(accepted.slides, true)
+      mainStore.setAIPPTDialogState(false)
+      step.value = 'outline'
+    }
+    else if (currentTask.status === 'partial_success') {
+      aiTasksStore.setRenderState('partial_success')
+      aiTasksStore.setRenderError(currentTask.error || '部分批次生成失败，可重跑失败批次')
+      step.value = 'generating'
+    }
+    else if (currentTask.status === 'failed') {
+      aiTasksStore.setRenderState('error')
+      aiTasksStore.setRenderError(currentTask.error || 'AI 制作失败，请重试')
+      message.error(currentTask.error || 'AI 制作失败，请重试')
+      step.value = 'outline'
+    }
+
+    return currentTask
+  }
+
   const renderPlannedDeck = async () => {
     const currentDeck = editableDeck.value
     if (!currentDeck) return null
@@ -112,38 +153,7 @@ export default () => {
         overwrite: true,
       })
       aiTasksStore.setActiveTaskId(task.id)
-
-      const currentTask = await pollAITaskUntilSettled(getAITask, task.id, {
-        intervalMs: 1000,
-        onPoll: (polledTask) => {
-          aiTasksStore.setLastPolledAt(formatPollTime())
-          if (polledTask?.progress) {
-            aiTasksStore.setRenderProgress(polledTask.progress)
-          }
-        },
-      })
-
-      if ((currentTask.status === 'succeeded' || currentTask.status === 'partial_success') && currentTask.output) {
-        aiTasksStore.setRenderState('success')
-        aiDeckStore.setRenderedDeck(currentTask.output.deck)
-        const accepted = await acceptDeckRender({
-          deckId: currentTask.output.deck.id,
-          createdBy: 'system',
-          sourceTaskId: currentTask.id,
-        })
-        mainStore.setCurrentDeckContext(accepted.deckId || currentTask.output.deck.id, accepted.versionId)
-        loadSlidesIntoEditor(accepted.slides, true)
-        mainStore.setAIPPTDialogState(false)
-        step.value = 'outline'
-      }
-      else if (currentTask.status === 'failed') {
-        aiTasksStore.setRenderState('error')
-        aiTasksStore.setRenderError(currentTask.error || 'AI 制作失败，请重试')
-        message.error(currentTask.error || 'AI 制作失败，请重试')
-        step.value = 'outline'
-      }
-
-      return currentTask
+      return await handleRenderTask(task.id)
     }
     catch (error) {
       aiTasksStore.setRenderState('error')
@@ -151,6 +161,27 @@ export default () => {
       aiTasksStore.setRenderError(text)
       message.error(text)
       step.value = 'outline'
+      return null
+    }
+  }
+
+  const retryFailedBatches = async () => {
+    if (!aiTasksStore.activeTaskId) return null
+
+    aiTasksStore.setRenderState('loading')
+    aiTasksStore.setRenderError('')
+    step.value = 'generating'
+
+    try {
+      const task = await retryFailedRenderBatchesRequest(aiTasksStore.activeTaskId)
+      aiTasksStore.setActiveTaskId(task.id)
+      return await handleRenderTask(task.id)
+    }
+    catch (error) {
+      aiTasksStore.setRenderState('partial_success')
+      const text = error instanceof Error ? error.message : '失败批次重跑失败，请重试'
+      aiTasksStore.setRenderError(text)
+      message.error(text)
       return null
     }
   }
@@ -207,14 +238,18 @@ export default () => {
     editableDeck,
     lastPolledAt,
     planningState,
+    renderError,
     renderState,
     isPlanning,
     isRendering,
+    canRetryFailedBatches,
     loadingText,
     outlineSlides,
     plannedPageCount,
+    renderProgress,
     createPlan,
     renderPlannedDeck,
+    retryFailedBatches,
     resetToSetup,
     updateOutlineSummary,
     updateSlideTitle,

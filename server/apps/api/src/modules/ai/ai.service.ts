@@ -12,6 +12,7 @@ import { SlideRegenerateDto } from './dto/slide-regenerate.dto'
 import type { AIDeck } from '../../../../../libs/ai-schema/src/ai-deck'
 import type { DeckDetailDto, DeckListItemDto } from './dto/deck-list.dto'
 import type { QueueJob } from '../../../../../libs/queue/src/queue.service'
+import type { RenderTaskProgress } from '../../../../../libs/ai-orchestrator/src/renderer/render-batch.types'
 
 @Injectable()
 export class AiService {
@@ -76,58 +77,22 @@ export class AiService {
       language,
     })).deck
 
-    const task = await Promise.resolve(this.queueService.enqueueAsync('deck_render', payload, async (ctx) => {
-      const runnerContext = ctx ?? {
-        jobId: '',
-        updateProgress: () => undefined,
-      }
+    const taskPayload = {
+      ...payload,
+      deck,
+    }
 
-      if (!this.deckRendererService) {
-        throw new Error('Deck renderer unavailable')
-      }
+    const task = await Promise.resolve(this.queueService.enqueueAsync('deck_render', taskPayload, async (ctx) =>
+      await this.runDeckRenderJob(deck, ctx)))
 
-      runnerContext.updateProgress({
-        totalBatches: 1,
-        completedBatches: 0,
-        failedBatches: 0,
-        retryingBatches: 0,
-      })
-
-      try {
-        const result = await this.deckRendererService.render(deck)
-        const progress = {
-          totalBatches: 1,
-          completedBatches: 1,
-          failedBatches: 0,
-          retryingBatches: 0,
-        }
-
-        runnerContext.updateProgress(progress)
-        if (runnerContext.jobId) {
-          await this.aiTasksRepository?.updateTaskProgress(runnerContext.jobId, progress, 'running')
-          await this.aiTasksRepository?.completeTask(runnerContext.jobId, {
-            progress,
-            deck: result.deck as unknown as Record<string, unknown>,
-            slides: result.slides as unknown as Record<string, unknown>,
-          })
-        }
-
-        return result
-      }
-      catch (error) {
-        if (runnerContext.jobId) {
-          await this.aiTasksRepository?.failTask(runnerContext.jobId, {
-            message: error instanceof Error ? error.message : 'AI render failed',
-          })
-        }
-        throw error
-      }
-    }))
+    const persistedDeck = deck.id && this.decksRepository
+      ? await this.decksRepository.findDeckSummaryById(deck.id)
+      : null
 
     await this.aiTasksRepository?.createTask({
       id: task.id,
       userId: 'system',
-      deckId: deck.id,
+      deckId: persistedDeck ? deck.id : undefined,
       taskType: 'deck_render',
       status: task.status,
       inputJson: {
@@ -176,6 +141,38 @@ export class AiService {
     return this.queueService.getJob(taskId) ?? {
       id: taskId,
       status: 'queued' as const,
+    }
+  }
+
+  async retryFailedRenderBatches(taskId: string) {
+    const job = this.queueService.getJob(taskId) as QueueJob<{
+      deck?: AIDeck
+    }> | null
+
+    if (!job?.payload?.deck) {
+      throw new NotFoundException(`Task ${taskId} not found`)
+    }
+
+    const previousProgress = this.readRenderTaskProgress(job.output)
+    const retryBatchIndexes = previousProgress?.batches
+      .filter(batch => batch.status === 'failed' && batch.canRetry)
+      .map(batch => batch.batchIndex) ?? []
+
+    const retried = await this.queueService.retryJob(taskId, async (ctx) =>
+      await this.runDeckRenderJob(job.payload.deck as AIDeck, ctx, {
+        retryBatchIndexes,
+        previousProgress,
+      }))
+
+    if (!retried) {
+      throw new NotFoundException(`Task ${taskId} not found`)
+    }
+
+    return {
+      id: retried.id,
+      type: retried.type,
+      status: retried.status,
+      error: retried.error,
     }
   }
 
@@ -289,6 +286,81 @@ export class AiService {
         slides: [],
       },
     }
+  }
+
+  private async runDeckRenderJob(
+    deck: AIDeck,
+    ctx?: { jobId: string; updateProgress: (progress: Record<string, unknown>) => void },
+    options?: {
+      retryBatchIndexes?: number[]
+      previousProgress?: RenderTaskProgress
+    },
+  ) {
+    const runnerContext = ctx ?? {
+      jobId: '',
+      updateProgress: () => undefined,
+    }
+
+    if (!this.deckRendererService) {
+      throw new Error('Deck renderer unavailable')
+    }
+
+    try {
+      const result = options?.retryBatchIndexes?.length
+        ? await this.deckRendererService.retryFailedBatches(deck, {
+          retryBatchIndexes: options.retryBatchIndexes,
+          previousProgress: options.previousProgress,
+          onProgress: async (progress) => await this.persistRenderProgress(runnerContext, progress),
+        })
+        : await this.deckRendererService.render(deck, {
+          onProgress: async (progress) => await this.persistRenderProgress(runnerContext, progress),
+        })
+
+      await this.persistRenderProgress(runnerContext, result.progress)
+      await this.persistRenderResult(runnerContext.jobId, result)
+      return result
+    }
+    catch (error) {
+      if (runnerContext.jobId) {
+        await this.aiTasksRepository?.failTask(runnerContext.jobId, {
+          message: error instanceof Error ? error.message : 'AI render failed',
+        })
+      }
+      throw error
+    }
+  }
+
+  private async persistRenderProgress(
+    runnerContext: { jobId: string; updateProgress: (progress: Record<string, unknown>) => void },
+    progress: RenderTaskProgress,
+  ) {
+    runnerContext.updateProgress(progress)
+    if (runnerContext.jobId) {
+      await this.aiTasksRepository?.updateTaskProgress(runnerContext.jobId, progress, 'running')
+    }
+  }
+
+  private async persistRenderResult(jobId: string, result: {
+    progress: RenderTaskProgress
+    deck: AIDeck
+    slides: unknown[]
+    partialSuccess: boolean
+    status?: 'partial_success'
+  }) {
+    if (!jobId) return
+
+    await this.aiTasksRepository?.completeTask(jobId, {
+      progress: result.progress as unknown as Record<string, unknown>,
+      deck: result.deck as unknown as Record<string, unknown>,
+      slides: result.slides as unknown as Record<string, unknown>,
+      partialSuccess: result.partialSuccess,
+    }, result.partialSuccess ? 'partial_success' : 'succeeded')
+  }
+
+  private readRenderTaskProgress(output: unknown) {
+    if (!output || typeof output !== 'object') return undefined
+    const record = output as Record<string, unknown>
+    return record.progress as RenderTaskProgress | undefined
   }
 
   private async ensureDeckExists(deckId: string, createdBy: string, aiDeckJson?: AIDeck) {

@@ -47,7 +47,15 @@
             @update:slide-planning-draft-list="updateSlidePlanningDraftList"
           />
 
-          <AIDeckGenerating v-else :last-polled-at="lastPolledAt" />
+          <AIDeckGenerating
+            v-else
+            :last-polled-at="lastPolledAt"
+            :progress="renderProgress"
+            :render-state="renderState"
+            :render-error="aiRenderError"
+            :can-retry-failed-batches="canRetryFailedBatches"
+            :on-retry-failed-batches="() => retryFailedBatches().then(() => undefined)"
+          />
         </main>
 
         <aside class="dialog-rail">
@@ -129,13 +137,18 @@ const {
   pageCountRange,
   language,
   editableDeck,
+  renderProgress,
+  renderState,
+  renderError: aiRenderError,
   lastPolledAt,
   isPlanning,
   isRendering,
+  canRetryFailedBatches,
   loadingText,
   plannedPageCount,
   createPlan,
   renderPlannedDeck,
+  retryFailedBatches,
   resetToSetup,
   updateOutlineSummary,
   updateSlideTitle,

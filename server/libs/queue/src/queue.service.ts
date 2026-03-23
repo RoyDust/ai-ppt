@@ -94,6 +94,49 @@ export class QueueService {
     return this.jobs.get(id) ?? null
   }
 
+  async retryJob(id: string, runner: (context: QueueRunnerContext) => Promise<unknown>) {
+    const existing = this.jobs.get(id)
+    if (!existing) return null
+
+    this.jobs.set(id, {
+      ...existing,
+      status: 'running',
+      error: undefined,
+    })
+
+    try {
+      const output = await runner({
+        jobId: id,
+        updateProgress: (progress) => {
+          const current = this.jobs.get(id) as QueueJob<unknown> | undefined
+          this.jobs.set(id, {
+            ...(current ?? existing),
+            status: 'running',
+            progress,
+          })
+        },
+      })
+
+      const status = this.resolveAsyncStatus(output)
+      const updated = {
+        ...(this.jobs.get(id) as QueueJob<unknown> | undefined ?? existing),
+        status,
+        output,
+      }
+      this.jobs.set(id, updated)
+      return updated
+    }
+    catch (error) {
+      const updated = {
+        ...(this.jobs.get(id) as QueueJob<unknown> | undefined ?? existing),
+        status: 'failed' as const,
+        error: error instanceof Error ? error.message : 'AI render failed',
+      }
+      this.jobs.set(id, updated)
+      return updated
+    }
+  }
+
   private resolveAsyncStatus(output: unknown): QueueJob<unknown>['status'] {
     if (output && typeof output === 'object') {
       const record = output as Record<string, unknown>

@@ -8,6 +8,9 @@ export const planDeck = async (payload: DeckPlanInput): Promise<DeckPlanResponse
 export const renderDeck = async (payload: DeckRenderInput): Promise<DeckRenderResponse> =>
   request.post('/api/ai/deck/render', payload) as Promise<DeckRenderResponse>
 
+export const retryFailedRenderBatches = async (taskId: string): Promise<DeckRenderResponse> =>
+  request.post(`/api/ai/tasks/${taskId}/retry-failed-batches`) as Promise<DeckRenderResponse>
+
 export const acceptDeckRender = async (payload: {
   deckId: string
   createdBy: string

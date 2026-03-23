@@ -58,4 +58,9 @@ export class AiController {
   getTask(@Param('id') taskId: string) {
     return this.aiService.getTask(taskId)
   }
+
+  @Post('tasks/:id/retry-failed-batches')
+  retryFailedRenderBatches(@Param('id') taskId: string) {
+    return this.aiService.retryFailedRenderBatches(taskId)
+  }
 }
