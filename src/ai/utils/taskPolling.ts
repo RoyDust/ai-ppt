@@ -3,7 +3,7 @@ import type { AITaskResponse } from '../types/deck'
 interface PollOptions {
   intervalMs?: number
   timeoutMs?: number
-  onPoll?: () => void
+  onPoll?: (task: AITaskResponse) => void
 }
 
 const delay = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
@@ -18,9 +18,9 @@ export const pollAITaskUntilSettled = async (
   const startedAt = Date.now()
 
   while (Date.now() - startedAt < timeoutMs) {
-    options.onPoll?.()
     const task = await getTask(taskId)
-    if (task.status !== 'queued') return task
+    options.onPoll?.(task)
+    if (task.status !== 'queued' && task.status !== 'running') return task
     await delay(intervalMs)
   }
 

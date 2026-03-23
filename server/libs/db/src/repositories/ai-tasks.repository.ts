@@ -7,6 +7,8 @@ interface CreateAITaskInput {
   deckVersionId?: string
   taskType: string
   status: string
+  inputJson?: Record<string, unknown>
+  outputJson?: Record<string, unknown>
 }
 
 export class AITasksRepository {
@@ -16,8 +18,41 @@ export class AITasksRepository {
     return this.prisma.aITask.create({
       data: {
         ...data,
-        inputJson: {},
-        outputJson: {},
+        inputJson: data.inputJson ?? {},
+        outputJson: data.outputJson ?? {},
+      },
+    })
+  }
+
+  updateTaskProgress(id: string, progress: Record<string, unknown>, status = 'running') {
+    return this.prisma.aITask.update({
+      where: { id },
+      data: {
+        status,
+        outputJson: {
+          progress,
+        },
+      },
+    })
+  }
+
+  completeTask(id: string, output: Record<string, unknown>, status = 'succeeded') {
+    return this.prisma.aITask.update({
+      where: { id },
+      data: {
+        status,
+        outputJson: output,
+      },
+    })
+  }
+
+  failTask(id: string, error: { message: string; code?: string }, status = 'failed') {
+    return this.prisma.aITask.update({
+      where: { id },
+      data: {
+        status,
+        errorCode: error.code,
+        errorMessage: error.message,
       },
     })
   }

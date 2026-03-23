@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import type { AIRenderProgress } from '../types/deck'
 
 export type AIPlanningState = 'idle' | 'loading' | 'success' | 'error'
 export type AIRenderState = 'idle' | 'loading' | 'success' | 'error'
@@ -9,6 +10,7 @@ interface AITasksState {
   renderError: string
   activeTaskId: string
   lastPolledAt: string
+  renderProgress: AIRenderProgress
 }
 
 export const useAITasksStore = defineStore('aiTasks', {
@@ -18,6 +20,12 @@ export const useAITasksStore = defineStore('aiTasks', {
     renderError: '',
     activeTaskId: '',
     lastPolledAt: '',
+    renderProgress: {
+      totalBatches: 0,
+      completedBatches: 0,
+      failedBatches: 0,
+      retryingBatches: 0,
+    },
   }),
 
   actions: {
@@ -39,6 +47,13 @@ export const useAITasksStore = defineStore('aiTasks', {
 
     setActiveTaskId(taskId: string) {
       this.activeTaskId = taskId
+    },
+
+    setRenderProgress(progress: Partial<AIRenderProgress>) {
+      this.renderProgress = {
+        ...this.renderProgress,
+        ...progress,
+      }
     },
   },
 })

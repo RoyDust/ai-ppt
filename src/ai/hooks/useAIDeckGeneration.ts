@@ -92,10 +92,16 @@ export default () => {
     const currentDeck = editableDeck.value
     if (!currentDeck) return null
 
-    aiTasksStore.setRenderState('loading')
-    aiTasksStore.setRenderError('')
-    aiTasksStore.setLastPolledAt('')
-    step.value = 'generating'
+      aiTasksStore.setRenderState('loading')
+      aiTasksStore.setRenderError('')
+      aiTasksStore.setLastPolledAt('')
+      aiTasksStore.setRenderProgress({
+        totalBatches: 0,
+        completedBatches: 0,
+        failedBatches: 0,
+        retryingBatches: 0,
+      })
+      step.value = 'generating'
     try {
       const task = await renderDeck({
         deck: currentDeck,
@@ -109,10 +115,15 @@ export default () => {
 
       const currentTask = await pollAITaskUntilSettled(getAITask, task.id, {
         intervalMs: 1000,
-        onPoll: () => aiTasksStore.setLastPolledAt(formatPollTime()),
+        onPoll: (polledTask) => {
+          aiTasksStore.setLastPolledAt(formatPollTime())
+          if (polledTask?.progress) {
+            aiTasksStore.setRenderProgress(polledTask.progress)
+          }
+        },
       })
 
-      if (currentTask.status === 'succeeded' && currentTask.output) {
+      if ((currentTask.status === 'succeeded' || currentTask.status === 'partial_success') && currentTask.output) {
         aiTasksStore.setRenderState('success')
         aiDeckStore.setRenderedDeck(currentTask.output.deck)
         const accepted = await acceptDeckRender({
@@ -150,6 +161,12 @@ export default () => {
     aiTasksStore.setRenderState('idle')
     aiTasksStore.setRenderError('')
     aiTasksStore.setLastPolledAt('')
+    aiTasksStore.setRenderProgress({
+      totalBatches: 0,
+      completedBatches: 0,
+      failedBatches: 0,
+      retryingBatches: 0,
+    })
   }
 
   const updateOutlineSummary = (value: string) => aiDeckStore.updateOutlineSummary(value)
