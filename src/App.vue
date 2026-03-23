@@ -5,6 +5,7 @@
     :loading="deckHub.loading.value"
     @create="deckHub.createNewDeck"
     @open="deckHub.openDeck"
+    @history="deckHub.openHistoryPlaceholder"
   />
   <template v-else-if="slides.length">
     <Screen v-if="screening" />

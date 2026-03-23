@@ -334,9 +334,10 @@ export class AiService {
     runnerContext: { jobId: string; updateProgress: (progress: Record<string, unknown>) => void },
     progress: RenderTaskProgress,
   ) {
-    runnerContext.updateProgress(progress)
+    const progressRecord = progress as unknown as Record<string, unknown>
+    runnerContext.updateProgress(progressRecord)
     if (runnerContext.jobId) {
-      await this.aiTasksRepository?.updateTaskProgress(runnerContext.jobId, progress, 'running')
+      await this.aiTasksRepository?.updateTaskProgress(runnerContext.jobId, progressRecord, 'running')
     }
   }
 

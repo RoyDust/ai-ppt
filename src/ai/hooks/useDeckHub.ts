@@ -4,6 +4,7 @@ import { useMainStore } from '@/store'
 import useAIDeckLoader from '@/ai/hooks/useAIDeckLoader'
 import { getDeckDetail, listDecks, type DeckHubDeckSummary } from '@/ai/services/deckHub'
 import type { Slide } from '@/types/slides'
+import message from '@/utils/message'
 
 const syncDeckLocation = (deckId = '', versionId = '') => {
   const url = new URL(window.location.href)
@@ -75,11 +76,16 @@ export default () => {
     return detail
   }
 
+  const openHistoryPlaceholder = async (_deckId: string) => {
+    message.warning('历史版本入口已预留，版本面板将在下一步接入。')
+  }
+
   return {
     decks,
     loading,
     loadDecks,
     createNewDeck,
     openDeck,
+    openHistoryPlaceholder,
   }
 }
