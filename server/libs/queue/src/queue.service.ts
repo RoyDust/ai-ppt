@@ -1,10 +1,16 @@
 import { Injectable } from '@nestjs/common'
 
+export interface QueueRunnerContext {
+  jobId: string
+  updateProgress: (progress: Record<string, unknown>) => void
+}
+
 export interface QueueJob<TPayload> {
   id: string
   type: string
   payload: TPayload
-  status: 'queued' | 'succeeded' | 'failed'
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'partial_success'
+  progress?: Record<string, unknown>
   output?: unknown
   error?: string
 }
@@ -33,7 +39,11 @@ export class QueueService {
     return job
   }
 
-  enqueueAsync<TPayload>(type: string, payload: TPayload, runner: () => Promise<unknown>): QueueJob<TPayload> {
+  enqueueAsync<TPayload>(
+    type: string,
+    payload: TPayload,
+    runner: (context: QueueRunnerContext) => Promise<unknown>,
+  ): QueueJob<TPayload> {
     const job: QueueJob<TPayload> = {
       id: `${type}_${Date.now()}`,
       type,
@@ -44,16 +54,33 @@ export class QueueService {
 
     queueMicrotask(async () => {
       try {
-        const output = await runner()
         this.jobs.set(job.id, {
           ...job,
-          status: 'succeeded',
+          status: 'running',
+        })
+
+        const output = await runner({
+          jobId: job.id,
+          updateProgress: (progress) => {
+            const current = this.jobs.get(job.id) as QueueJob<TPayload> | undefined
+            this.jobs.set(job.id, {
+              ...(current ?? job),
+              status: 'running',
+              progress,
+            })
+          },
+        })
+
+        const status = this.resolveAsyncStatus(output)
+        this.jobs.set(job.id, {
+          ...(this.jobs.get(job.id) as QueueJob<TPayload> | undefined ?? job),
+          status,
           output,
         })
       }
       catch (error) {
         this.jobs.set(job.id, {
-          ...job,
+          ...(this.jobs.get(job.id) as QueueJob<TPayload> | undefined ?? job),
           status: 'failed',
           error: error instanceof Error ? error.message : 'AI render failed',
         })
@@ -65,5 +92,16 @@ export class QueueService {
 
   getJob(id: string) {
     return this.jobs.get(id) ?? null
+  }
+
+  private resolveAsyncStatus(output: unknown): QueueJob<unknown>['status'] {
+    if (output && typeof output === 'object') {
+      const record = output as Record<string, unknown>
+      if (record.status === 'partial_success' || record.partialSuccess === true) {
+        return 'partial_success'
+      }
+    }
+
+    return 'succeeded'
   }
 }

@@ -1,5 +1,6 @@
 import type { AIDeck } from '../../../ai-schema/src/ai-deck'
 import type { SlideRegenerationContext } from '../../../ai-schema/src/regeneration-context'
+import type { DeckRenderBatchInput, DeckRenderBatchResponse } from '../renderer/render-batch.types'
 
 export interface ResearchProjectInput {
   projectBackground?: string[]
@@ -46,5 +47,6 @@ export interface LLMProvider {
   readonly name: string
   planDeck(input: DeckPlanRequest): Promise<DeckPlanResult>
   renderDeck(input: DeckRenderRequest): Promise<DeckRenderResult>
+  renderDeckBatch?(input: DeckRenderBatchInput): Promise<DeckRenderBatchResponse>
   regenerateSlide(input: SlideRegenerationContext): Promise<SlideRegenerationResult>
 }

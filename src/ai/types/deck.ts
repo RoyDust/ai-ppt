@@ -74,15 +74,23 @@ export interface DeckPlanResponse {
 
 export interface DeckRenderResponse {
   id: string
-  status: 'queued' | 'succeeded' | 'failed'
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'partial_success'
   type?: string
+}
+
+export interface AIRenderProgress {
+  totalBatches: number
+  completedBatches: number
+  failedBatches: number
+  retryingBatches: number
 }
 
 export interface AITaskResponse {
   id: string
-  status: 'queued' | 'succeeded' | 'failed'
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'partial_success'
   type?: string
   error?: string
+  progress?: Partial<AIRenderProgress>
   output?: {
     deck: AIDeck
     slides: Slide[]

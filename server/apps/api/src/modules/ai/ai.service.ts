@@ -76,12 +76,71 @@ export class AiService {
       language,
     })).deck
 
-    return this.queueService.enqueueAsync('deck_render', payload, async () => {
+    const task = await Promise.resolve(this.queueService.enqueueAsync('deck_render', payload, async (ctx) => {
+      const runnerContext = ctx ?? {
+        jobId: '',
+        updateProgress: () => undefined,
+      }
+
       if (!this.deckRendererService) {
         throw new Error('Deck renderer unavailable')
       }
-      return this.deckRendererService.render(deck)
+
+      runnerContext.updateProgress({
+        totalBatches: 1,
+        completedBatches: 0,
+        failedBatches: 0,
+        retryingBatches: 0,
+      })
+
+      try {
+        const result = await this.deckRendererService.render(deck)
+        const progress = {
+          totalBatches: 1,
+          completedBatches: 1,
+          failedBatches: 0,
+          retryingBatches: 0,
+        }
+
+        runnerContext.updateProgress(progress)
+        if (runnerContext.jobId) {
+          await this.aiTasksRepository?.updateTaskProgress(runnerContext.jobId, progress, 'running')
+          await this.aiTasksRepository?.completeTask(runnerContext.jobId, {
+            progress,
+            deck: result.deck as unknown as Record<string, unknown>,
+            slides: result.slides as unknown as Record<string, unknown>,
+          })
+        }
+
+        return result
+      }
+      catch (error) {
+        if (runnerContext.jobId) {
+          await this.aiTasksRepository?.failTask(runnerContext.jobId, {
+            message: error instanceof Error ? error.message : 'AI render failed',
+          })
+        }
+        throw error
+      }
+    }))
+
+    await this.aiTasksRepository?.createTask({
+      id: task.id,
+      userId: 'system',
+      deckId: deck.id,
+      taskType: 'deck_render',
+      status: task.status,
+      inputJson: {
+        deckId: deck.id,
+      },
     })
+
+    return {
+      id: task.id,
+      type: task.type,
+      status: task.status,
+      error: (task as QueueJob<unknown>).error,
+    }
   }
 
   async regenerateSlide(payload: SlideRegenerateDto) {

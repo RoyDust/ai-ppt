@@ -10,6 +10,7 @@ import type {
   ResearchProjectInput,
   SlideRegenerationResult,
 } from './llm-provider.interface'
+import type { DeckRenderBatchInput, DeckRenderBatchResponse } from '../renderer/render-batch.types'
 import { getPPTSkillContext, getPPTSkillProfile, type PPTSkillProfile } from './ppt-skill-context'
 
 export interface OpenAIProviderOptions {
@@ -767,6 +768,78 @@ export class OpenAIProvider implements LLMProvider {
     return { deck: this.normalizeDeck(parsed, input.deck) }
   }
 
+  async renderDeckBatch(input: DeckRenderBatchInput): Promise<DeckRenderBatchResponse> {
+    const apiKey = this.options.apiKey ?? process.env.OPENAI_API_KEY
+    const baseURL = (this.options.baseURL ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '')
+
+    if (!apiKey) {
+      throw new Error('OpenAI API key missing for deck render batch')
+    }
+
+    try {
+      const json = await this.requestChatCompletion(baseURL, apiKey, {
+        model: this.model,
+        temperature: 0.8,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: [
+              '你是顶级 PPT 制作总监，负责对 deck 的单个批次进行最终内容制作。',
+              '你只会收到共享上下文和当前批次 slides。',
+              '输出 JSON，顶层字段必须是 slides。',
+              'slides 中只允许返回当前批次对应的页面，不能补写其他批次。',
+              '每个 slide 必须包含：id, kind, title, subtitle, summary, bullets, bodySections, keyHighlights, visualTone, imageIntent, regeneratable, designRequirements, designFeatures, layoutInstructions, validationResult, planningDraft, metadata。',
+              '优先根据 planningDraft 重写内容，但不要泄露提示词、版式说明或元文本标签。',
+            ].join('\n'),
+          },
+          {
+            role: 'system',
+            content: getPPTSkillContext('render'),
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              sharedContext: {
+                topic: input.sharedContext.topic,
+                language: input.sharedContext.language,
+                outlineSummary: input.sharedContext.outlineSummary,
+                goalPageCount: input.sharedContext.goalPageCount,
+                templateId: input.sharedContext.templateId,
+                designSystem: input.sharedContext.designSystem,
+                themeName: input.sharedContext.themeName,
+                contentBlueprint: input.sharedContext.contentBlueprint,
+              },
+              batchIndex: input.batchIndex,
+              batchCount: input.batchCount,
+              slides: input.slides,
+            }),
+          },
+        ],
+      })
+      const content = json?.choices?.[0]?.message?.content
+      if (typeof content !== 'string') {
+        throw new Error('Missing model content for deck render batch')
+      }
+
+      const parsed = extractJson(content)
+      const rawSlides = Array.isArray(parsed.slides) ? parsed.slides : []
+      const slides = rawSlides
+        .map((slide: unknown, index: number) => this.normalizeSlide(slide, index, input.sharedContext.topic))
+        .filter(Boolean)
+
+      if (!slides.length) {
+        throw new Error('Invalid model output for deck render batch')
+      }
+
+      return { slides }
+    }
+    catch (error) {
+      const classified = this.classifyRenderBatchError(error)
+      throw new Error(classified.message)
+    }
+  }
+
   async regenerateSlide(input: SlideRegenerationContext): Promise<SlideRegenerationResult> {
     const apiKey = this.options.apiKey ?? process.env.OPENAI_API_KEY
     const baseURL = (this.options.baseURL ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '')
@@ -1020,5 +1093,27 @@ export class OpenAIProvider implements LLMProvider {
     finally {
       if (timeoutId) clearTimeout(timeoutId)
     }
+  }
+
+  private classifyRenderBatchError(error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown render batch error'
+
+    if (/timed out|abort/i.test(message)) {
+      return { code: 'timeout', retryable: true, message }
+    }
+
+    if (/\b429\b/.test(message)) {
+      return { code: 'rate_limit', retryable: true, message }
+    }
+
+    if (/\b5\d{2}\b/.test(message)) {
+      return { code: 'server_error', retryable: true, message }
+    }
+
+    if (/Invalid model output|No JSON object|Missing model content/i.test(message)) {
+      return { code: 'invalid_output', retryable: false, message }
+    }
+
+    return { code: 'unknown', retryable: false, message }
   }
 }
